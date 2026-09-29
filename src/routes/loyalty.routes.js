@@ -1,0 +1,10 @@
+import { Router } from "express";
+import { requireAuth } from "../middleware/auth.middleware.js";
+import * as c from "../controllers/loyalty.controller.js";
+const r = Router();
+r.use(requireAuth);
+r.get("/accounts", c.accounts);
+r.post("/adjust", c.adjust);
+r.post("/redemptions", c.redeem);
+r.patch("/redemptions/:id/decision", c.decide);
+export default r;

@@ -2,7 +2,5 @@ node_modules/
 .env
 .env.*
 !.env.example
-logs/
 coverage/
 .DS_Store
-npm-debug.log*

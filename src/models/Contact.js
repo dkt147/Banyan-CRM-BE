@@ -1,117 +1,41 @@
 import mongoose from "mongoose";
-
-const contactSchema = new mongoose.Schema(
+const schema = new mongoose.Schema(
   {
-    firstName: {
-      type: String,
+    workspaceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Workspace",
       required: true,
-      trim: true,
-      maxlength: 100
+      index: true,
     },
-
-    lastName: {
-      type: String,
-      trim: true,
-      maxlength: 100,
-      default: ""
-    },
-
-    email: {
-      type: String,
-      trim: true,
-      lowercase: true,
-      default: null,
-      index: true
-    },
-
-    phone: {
-      type: String,
-      trim: true,
-      default: null
-    },
-
-    whatsapp: {
-      type: String,
-      trim: true,
-      default: null
-    },
-
-    jobTitle: {
-      type: String,
-      trim: true,
-      default: null
-    },
-
+    firstName: { type: String, required: true, trim: true, maxlength: 100 },
+    lastName: { type: String, trim: true, default: "" },
+    email: { type: String, lowercase: true, trim: true, index: true },
+    phone: String,
+    whatsapp: String,
+    jobTitle: String,
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",
-      default: null,
-      index: true
+      index: true,
     },
-
-    tags: [
-      {
-        type: String,
-        enum: [
-          "prospect",
-          "active_member",
-          "past_member",
-          "event_client",
-          "broker_agent",
-          "ngo",
-          "vip"
-        ]
-      }
-    ],
-
-    source: {
-      type: String,
-      trim: true,
-      default: null
-    },
-
-    language: {
-      type: String,
-      trim: true,
-      default: "en"
-    },
-
+    tags: [String],
+    source: String,
+    language: { type: String, default: "en" },
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true
+      index: true,
     },
-
-    notes: {
-      type: String,
-      trim: true,
-      default: null
-    },
-
-    isArchived: {
-      type: Boolean,
-      default: false,
-      index: true
-    }
+    notes: String,
+    isArchived: { type: Boolean, default: false, index: true },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
-  {
-    timestamps: true
-  }
+  { timestamps: true, toJSON: { virtuals: true } },
 );
-
-contactSchema.virtual("fullName").get(function () {
+schema.virtual("fullName").get(function () {
   return `${this.firstName} ${this.lastName}`.trim();
 });
-
-contactSchema.set("toJSON", {
-  virtuals: true
-});
-
-contactSchema.index({
-  firstName: "text",
-  lastName: "text",
-  email: "text"
-});
-
-export const Contact = mongoose.model("Contact", contactSchema);
+schema.index({ workspaceId: 1, email: 1 });
+schema.index({ firstName: "text", lastName: "text", email: "text" });
+export const Contact = mongoose.model("Contact", schema);

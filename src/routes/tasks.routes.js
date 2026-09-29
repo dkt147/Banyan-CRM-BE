@@ -1,0 +1,11 @@
+import { Router } from "express";
+import { requireAuth } from "../middleware/auth.middleware.js";
+import { resourceRouter } from "./resource.routes.js";
+import { resourceRegistry } from "../utils/resourceRegistry.js";
+import { complete, snooze } from "../controllers/task.controller.js";
+const r = Router();
+r.use(resourceRouter(resourceRegistry.tasks.service));
+r.use(requireAuth);
+r.patch("/:id/complete", complete);
+r.patch("/:id/snooze", snooze);
+export default r;

@@ -1,0 +1,11 @@
+import { Router } from "express";
+import { requireAuth, requireRoles } from "../middleware/auth.middleware.js";
+import * as c from "../controllers/member.controller.js";
+const r = Router();
+r.use(requireAuth);
+r.get("/", c.list);
+r.get("/:id", c.get);
+r.post("/", requireRoles("admin", "manager"), c.create);
+r.patch("/:id", requireRoles("admin", "manager"), c.update);
+r.delete("/:id", requireRoles("admin"), c.remove);
+export default r;

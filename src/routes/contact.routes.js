@@ -7,41 +7,23 @@ import {
   getContactController,
   updateContactController,
   archiveContactController,
-  deleteContactController
+  deleteContactController,
 } from "../controllers/contact.controller.js";
 
 const router = Router();
 
 router.use(requireAuth);
 
-router.post(
-  "/",
-  createContactController
-);
+router.post("/", createContactController);
 
-router.get(
-  "/",
-  getContactsController
-);
+router.get("/", getContactsController);
 
-router.get(
-  "/:contactId",
-  getContactController
-);
+router.get("/:contactId", getContactController);
 
-router.patch(
-  "/:contactId",
-  updateContactController
-);
+router.patch("/:contactId", updateContactController);
 
-router.patch(
-  "/:contactId/archive",
-  archiveContactController
-);
+router.patch("/:contactId/archive", archiveContactController);
 
-router.delete(
-  "/:contactId",
-  deleteContactController
-);
+router.delete("/:contactId", deleteContactController);
 
 export default router;

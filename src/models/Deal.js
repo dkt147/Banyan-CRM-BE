@@ -1,140 +1,63 @@
 import mongoose from "mongoose";
-
-const dealSchema = new mongoose.Schema(
+const schema = new mongoose.Schema(
   {
-    title: {
-      type: String,
+    workspaceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Workspace",
       required: true,
-      trim: true,
-      maxlength: 200
+      index: true,
     },
-
+    title: { type: String, required: true, trim: true, maxlength: 200 },
     contactId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Contact",
       required: true,
-      index: true
+      index: true,
     },
-
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",
-      default: null,
-      index: true
+      index: true,
     },
-
     pipelineId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Pipeline",
       required: true,
-      index: true
+      index: true,
     },
-
     stageId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "PipelineStage",
       required: true,
-      index: true
+      index: true,
     },
-
-    value: {
-      type: Number,
-      min: 0,
-      default: 0
-    },
-
-    currency: {
-      type: String,
-      trim: true,
-      uppercase: true,
-      default: "HKD"
-    },
-
-    productType: {
-      type: String,
-      enum: [
-        "membership",
-        "private_office",
-        "venue_hire",
-        "transactional",
-        "meeting_room",
-        "day_pass",
-        "virtual_office",
-        "studio",
-        "other"
-      ],
-      default: "other"
-    },
-
-    source: {
-      type: String,
-      trim: true,
-      default: null
-    },
-
-    expectedCloseDate: {
-      type: Date,
-      default: null
-    },
-
+    value: { type: Number, min: 0, default: 0 },
+    recurringValue: { type: Number, min: 0, default: 0 },
+    currency: { type: String, default: "HKD", uppercase: true },
+    productType: { type: String, default: "other" },
+    source: String,
+    expectedCloseDate: Date,
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true
+      index: true,
     },
-
     status: {
       type: String,
       enum: ["open", "won", "lost"],
       default: "open",
-      index: true
+      index: true,
     },
-
-    lostReason: {
-      type: String,
-      trim: true,
-      default: null
-    },
-
-    description: {
-      type: String,
-      trim: true,
-      default: null
-    },
-
-    lastActivityAt: {
-      type: Date,
-      default: null,
-      index: true
-    },
-
-    nextActionAt: {
-      type: Date,
-      default: null,
-      index: true
-    },
-
-    metadata: {
-      type: mongoose.Schema.Types.Mixed,
-      default: {}
-    }
+    lostReason: String,
+    description: String,
+    lastActivityAt: Date,
+    nextActionAt: Date,
+    stageChangedAt: Date,
+    metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
-  {
-    timestamps: true
-  }
+  { timestamps: true },
 );
-
-dealSchema.index({
-  title: "text",
-  source: "text"
-});
-
-dealSchema.index({
-  ownerId: 1,
-  pipelineId: 1,
-  stageId: 1,
-  status: 1
-});
-
-export const Deal = mongoose.model("Deal", dealSchema);
+schema.index({ workspaceId: 1, pipelineId: 1, stageId: 1, status: 1 });
+schema.index({ title: "text", source: "text" });
+export const Deal = mongoose.model("Deal", schema);

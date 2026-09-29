@@ -1,78 +1,36 @@
 import mongoose from "mongoose";
-
-const activitySchema = new mongoose.Schema(
+const schema = new mongoose.Schema(
   {
-    type: {
-      type: String,
-      enum: [
-        "note",
-        "call",
-        "email",
-        "whatsapp",
-        "meeting",
-        "stage_change",
-        "deal_created",
-        "task_created"
-      ],
+    workspaceId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Workspace",
       required: true,
-      index: true
+      index: true,
     },
-
+    type: { type: String, required: true, index: true },
     contactId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Contact",
-      default: null,
-      index: true
+      index: true,
     },
-
     companyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Company",
-      default: null,
-      index: true
+      index: true,
     },
-
-    dealId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Deal",
-      default: null,
-      index: true
-    },
-
+    dealId: { type: mongoose.Schema.Types.ObjectId, ref: "Deal", index: true },
     userId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      index: true
+      index: true,
     },
-
-    subject: {
-      type: String,
-      trim: true,
-      maxlength: 200,
-      default: null
-    },
-
-    body: {
-      type: String,
-      trim: true,
-      default: null
-    },
-
-    occurredAt: {
-      type: Date,
-      default: Date.now,
-      index: true
-    },
-
-    metadata: {
-      type: mongoose.Schema.Types.Mixed,
-      default: {}
-    }
+    subject: String,
+    body: String,
+    occurredAt: { type: Date, default: Date.now, index: true },
+    metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
-  {
-    timestamps: true
-  }
+  { timestamps: true },
 );
-
-export const Activity = mongoose.model("Activity", activitySchema);
+schema.index({ workspaceId: 1, occurredAt: -1 });
+export const Activity = mongoose.model("Activity", schema);

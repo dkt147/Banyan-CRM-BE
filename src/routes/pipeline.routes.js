@@ -1,74 +1,121 @@
 import { Router } from "express";
-
 import { requireAuth } from "../middleware/auth.middleware.js";
-
-import {
-  createPipelineController,
-  getPipelinesController,
-  getPipelineController,
-  updatePipelineController,
-  createPipelineStageController,
-  getPipelineStagesController,
-  getPipelineWithStagesController,
-  updatePipelineStageController,
-  deletePipelineStageController
-} from "../controllers/pipeline.controller.js";
-
-const router = Router();
-
-router.use(requireAuth);
-
-/*
- * Pipelines
- */
-
-router.post(
+import { resourceRouter } from "./resource.routes.js";
+import { resourceRegistry } from "../utils/resourceRegistry.js";
+import { PipelineStage } from "../models/PipelineStage.js";
+import { AppError } from "../utils/AppError.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+const r = Router();
+r.use(requireAuth); // Explicit pipeline handlers keep workspace scoping and stage relationships safe.
+r.get(
   "/",
-  createPipelineController
+  asyncHandler(async (req, res) =>
+    res.json({
+      success: true,
+      data: await resourceRegistry.pipelines.service.list(
+        req.workspaceId,
+        req.query,
+      ),
+    }),
+  ),
 );
-
-router.get(
+r.post(
   "/",
-  getPipelinesController
+  asyncHandler(async (req, res) =>
+    res.status(201).json({
+      success: true,
+      data: await resourceRegistry.pipelines.service.create(
+        req.workspaceId,
+        req.user._id,
+        req.body,
+      ),
+    }),
+  ),
 );
-
-router.get(
-  "/:pipelineId",
-  getPipelineController
+r.get(
+  "/:id",
+  asyncHandler(async (req, res) =>
+    res.json({
+      success: true,
+      data: await resourceRegistry.pipelines.service.get(
+        req.workspaceId,
+        req.params.id,
+      ),
+    }),
+  ),
 );
-
-router.patch(
-  "/:pipelineId",
-  updatePipelineController
+r.patch(
+  "/:id",
+  asyncHandler(async (req, res) =>
+    res.json({
+      success: true,
+      data: await resourceRegistry.pipelines.service.update(
+        req.workspaceId,
+        req.params.id,
+        req.user._id,
+        req.body,
+      ),
+    }),
+  ),
 );
-
-/*
- * Pipeline stages
- */
-
-router.post(
-  "/:pipelineId/stages",
-  createPipelineStageController
+r.delete(
+  "/:id",
+  asyncHandler(async (req, res) =>
+    res.json({
+      success: true,
+      data: await resourceRegistry.pipelines.service.remove(
+        req.workspaceId,
+        req.params.id,
+      ),
+    }),
+  ),
 );
-
-router.get(
-  "/:pipelineId/stages",
-  getPipelineStagesController
+r.get(
+  "/:id/stages",
+  asyncHandler(async (req, res) =>
+    res.json({
+      success: true,
+      data: await PipelineStage.find({
+        workspaceId: req.workspaceId,
+        pipelineId: req.params.id,
+      }).sort({ sortOrder: 1 }),
+    }),
+  ),
 );
-
-router.get(
-  "/:pipelineId/with-stages",
-  getPipelineWithStagesController
+r.post(
+  "/:id/stages",
+  asyncHandler(async (req, res) =>
+    res.status(201).json({
+      success: true,
+      data: await PipelineStage.create({
+        ...req.body,
+        workspaceId: req.workspaceId,
+        pipelineId: req.params.id,
+      }),
+    }),
+  ),
 );
-
-router.patch(
+r.patch(
   "/stages/:stageId",
-  updatePipelineStageController
+  asyncHandler(async (req, res) => {
+    const d = await PipelineStage.findOneAndUpdate(
+      { _id: req.params.stageId, workspaceId: req.workspaceId },
+      req.body,
+      { new: true, runValidators: true },
+    );
+    if (!d) throw new AppError("Stage not found", 404, "NOT_FOUND");
+    res.json({ success: true, data: d });
+  }),
 );
-
-router.delete(
+r.delete(
   "/stages/:stageId",
-  deletePipelineStageController
+  asyncHandler(async (req, res) => {
+    const d = await PipelineStage.findOneAndDelete({
+      _id: req.params.stageId,
+      workspaceId: req.workspaceId,
+    });
+    if (!d) throw new AppError("Stage not found", 404, "NOT_FOUND");
+    res.json({ success: true, data: d });
+  }),
 );
-
-export default router;
+export default r;

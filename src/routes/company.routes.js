@@ -8,41 +8,23 @@ import {
   getCompanyController,
   updateCompanyController,
   archiveCompanyController,
-  deleteCompanyController
+  deleteCompanyController,
 } from "../controllers/company.controller.js";
 
 const router = Router();
 
 router.use(requireAuth);
 
-router.post(
-  "/",
-  createCompanyController
-);
+router.post("/", createCompanyController);
 
-router.get(
-  "/",
-  getCompaniesController
-);
+router.get("/", getCompaniesController);
 
-router.get(
-  "/:companyId",
-  getCompanyController
-);
+router.get("/:companyId", getCompanyController);
 
-router.patch(
-  "/:companyId",
-  updateCompanyController
-);
+router.patch("/:companyId", updateCompanyController);
 
-router.patch(
-  "/:companyId/archive",
-  archiveCompanyController
-);
+router.patch("/:companyId/archive", archiveCompanyController);
 
-router.delete(
-  "/:companyId",
-  deleteCompanyController
-);
+router.delete("/:companyId", deleteCompanyController);
 
 export default router;

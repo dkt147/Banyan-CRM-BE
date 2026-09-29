@@ -1,0 +1,11 @@
+import { Router } from "express";
+import { requireAuth } from "../middleware/auth.middleware.js";
+import * as c from "../controllers/inbox.controller.js";
+const r = Router();
+r.use(requireAuth);
+r.get("/", c.list);
+r.get("/:id", c.get);
+r.post("/:id/messages", c.send);
+r.patch("/:id/read", c.markRead);
+r.patch("/:id/link", c.link);
+export default r;

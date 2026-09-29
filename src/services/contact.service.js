@@ -7,21 +7,17 @@ export async function createContact(data, ownerId) {
   if (data.companyId) {
     const company = await Company.findOne({
       _id: data.companyId,
-      ownerId
+      ownerId,
     });
 
     if (!company) {
-      throw new AppError(
-        "Company not found.",
-        404,
-        "COMPANY_NOT_FOUND"
-      );
+      throw new AppError("Company not found.", 404, "COMPANY_NOT_FOUND");
     }
   }
 
   const contact = await Contact.create({
     ...data,
-    ownerId
+    ownerId,
   });
 
   return contact;
@@ -33,13 +29,13 @@ export async function getContacts({
   limit = 20,
   search,
   companyId,
-  isArchived = false
+  isArchived = false,
 }) {
   const skip = (page - 1) * limit;
 
   const filter = {
     ownerId,
-    isArchived
+    isArchived,
   };
 
   if (companyId) {
@@ -48,7 +44,7 @@ export async function getContacts({
 
   if (search?.trim()) {
     filter.$text = {
-      $search: search.trim()
+      $search: search.trim(),
     };
   }
 
@@ -59,7 +55,7 @@ export async function getContacts({
       .skip(skip)
       .limit(limit),
 
-    Contact.countDocuments(filter)
+    Contact.countDocuments(filter),
   ]);
 
   return {
@@ -68,23 +64,19 @@ export async function getContacts({
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit)
-    }
+      totalPages: Math.ceil(total / limit),
+    },
   };
 }
 
 export async function getContactById(contactId, ownerId) {
   const contact = await Contact.findOne({
     _id: contactId,
-    ownerId
+    ownerId,
   }).populate("companyId", "name industry website");
 
   if (!contact) {
-    throw new AppError(
-      "Contact not found.",
-      404,
-      "CONTACT_NOT_FOUND"
-    );
+    throw new AppError("Contact not found.", 404, "CONTACT_NOT_FOUND");
   }
 
   return contact;
@@ -94,38 +86,30 @@ export async function updateContact(contactId, ownerId, data) {
   if (data.companyId) {
     const company = await Company.findOne({
       _id: data.companyId,
-      ownerId
+      ownerId,
     });
 
     if (!company) {
-      throw new AppError(
-        "Company not found.",
-        404,
-        "COMPANY_NOT_FOUND"
-      );
+      throw new AppError("Company not found.", 404, "COMPANY_NOT_FOUND");
     }
   }
 
   const contact = await Contact.findOneAndUpdate(
     {
       _id: contactId,
-      ownerId
+      ownerId,
     },
     {
-      $set: data
+      $set: data,
     },
     {
       new: true,
-      runValidators: true
-    }
+      runValidators: true,
+    },
   ).populate("companyId", "name industry");
 
   if (!contact) {
-    throw new AppError(
-      "Contact not found.",
-      404,
-      "CONTACT_NOT_FOUND"
-    );
+    throw new AppError("Contact not found.", 404, "CONTACT_NOT_FOUND");
   }
 
   return contact;
@@ -135,24 +119,20 @@ export async function archiveContact(contactId, ownerId) {
   const contact = await Contact.findOneAndUpdate(
     {
       _id: contactId,
-      ownerId
+      ownerId,
     },
     {
       $set: {
-        isArchived: true
-      }
+        isArchived: true,
+      },
     },
     {
-      new: true
-    }
+      new: true,
+    },
   );
 
   if (!contact) {
-    throw new AppError(
-      "Contact not found.",
-      404,
-      "CONTACT_NOT_FOUND"
-    );
+    throw new AppError("Contact not found.", 404, "CONTACT_NOT_FOUND");
   }
 
   return contact;
@@ -161,26 +141,22 @@ export async function archiveContact(contactId, ownerId) {
 export async function deleteContact(contactId, ownerId) {
   const contact = await Contact.findOne({
     _id: contactId,
-    ownerId
+    ownerId,
   });
 
   if (!contact) {
-    throw new AppError(
-      "Contact not found.",
-      404,
-      "CONTACT_NOT_FOUND"
-    );
+    throw new AppError("Contact not found.", 404, "CONTACT_NOT_FOUND");
   }
 
   const dealCount = await Deal.countDocuments({
-    contactId: contact._id
+    contactId: contact._id,
   });
 
   if (dealCount > 0) {
     throw new AppError(
       "Contact cannot be deleted because it is linked to deals. Archive it instead.",
       409,
-      "CONTACT_HAS_RELATIONS"
+      "CONTACT_HAS_RELATIONS",
     );
   }
 
@@ -188,6 +164,6 @@ export async function deleteContact(contactId, ownerId) {
 
   return {
     id: contactId,
-    deleted: true
+    deleted: true,
   };
 }

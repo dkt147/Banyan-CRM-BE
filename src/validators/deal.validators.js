@@ -1,14 +1,8 @@
 import { z } from "zod";
 
-const objectId = z
-  .string()
-  .regex(/^[0-9a-fA-F]{24}$/, "Invalid ID");
+const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid ID");
 
-const dealStatus = z.enum([
-  "open",
-  "won",
-  "lost"
-]);
+const dealStatus = z.enum(["open", "won", "lost"]);
 
 const productTypes = z.enum([
   "membership",
@@ -19,110 +13,57 @@ const productTypes = z.enum([
   "day_pass",
   "virtual_office",
   "studio",
-  "other"
+  "other",
 ]);
 
 export const createDealSchema = z.object({
-  title: z
-    .string()
-    .trim()
-    .min(2, "Deal title is required")
-    .max(200),
+  title: z.string().trim().min(2, "Deal title is required").max(200),
 
   contactId: objectId,
 
-  companyId: objectId
-    .nullable()
-    .optional(),
+  companyId: objectId.nullable().optional(),
 
   pipelineId: objectId,
 
   stageId: objectId,
 
-  value: z
-    .number()
-    .min(0)
-    .default(0),
+  value: z.number().min(0).default(0),
 
-  currency: z
-    .string()
-    .trim()
-    .length(3)
-    .toUpperCase()
-    .default("HKD"),
+  currency: z.string().trim().length(3).toUpperCase().default("HKD"),
 
   productType: productTypes.default("other"),
 
-  source: z
-    .string()
-    .trim()
-    .max(100)
-    .nullable()
-    .optional(),
+  source: z.string().trim().max(100).nullable().optional(),
 
-  expectedCloseDate: z
-    .coerce
-    .date()
-    .nullable()
-    .optional(),
+  expectedCloseDate: z.coerce.date().nullable().optional(),
 
   status: dealStatus.optional(),
 
-  lostReason: z
-    .string()
-    .trim()
-    .max(500)
-    .nullable()
-    .optional(),
+  lostReason: z.string().trim().max(500).nullable().optional(),
 
-  description: z
-    .string()
-    .trim()
-    .max(5000)
-    .nullable()
-    .optional(),
+  description: z.string().trim().max(5000).nullable().optional(),
 
-  nextActionAt: z
-    .coerce
-    .date()
-    .nullable()
-    .optional(),
+  nextActionAt: z.coerce.date().nullable().optional(),
 
-  metadata: z
-    .record(z.string(), z.any())
-    .optional()
+  metadata: z.record(z.string(), z.any()).optional(),
 });
 
-export const updateDealSchema =
-  createDealSchema.partial();
+export const updateDealSchema = createDealSchema.partial();
 
 export const moveDealSchema = z.object({
-  stageId: objectId
+  stageId: objectId,
 });
 
 export const dealIdParamSchema = z.object({
-  dealId: objectId
+  dealId: objectId,
 });
 
 export const dealListQuerySchema = z.object({
-  page: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .default(1),
+  page: z.coerce.number().int().min(1).default(1),
 
-  limit: z.coerce
-    .number()
-    .int()
-    .min(1)
-    .max(100)
-    .default(20),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
 
-  search: z
-    .string()
-    .trim()
-    .max(200)
-    .optional(),
+  search: z.string().trim().max(200).optional(),
 
   pipelineId: objectId.optional(),
 
@@ -132,5 +73,5 @@ export const dealListQuerySchema = z.object({
 
   contactId: objectId.optional(),
 
-  companyId: objectId.optional()
+  companyId: objectId.optional(),
 });

@@ -1,395 +1,131 @@
 import { Deal } from "../models/Deal.js";
-import { Contact } from "../models/Contact.js";
-import { Company } from "../models/Company.js";
 import { Pipeline } from "../models/Pipeline.js";
 import { PipelineStage } from "../models/PipelineStage.js";
+import { Contact } from "../models/Contact.js";
+import { Company } from "../models/Company.js";
 import { Activity } from "../models/Activity.js";
 import { AppError } from "../utils/AppError.js";
-
-async function validateDealRelations(data, ownerId) {
-  const contact = await Contact.findOne({
-    _id: data.contactId,
-    ownerId
-  });
-
-  if (!contact) {
-    throw new AppError(
-      "Contact not found.",
-      404,
-      "CONTACT_NOT_FOUND"
-    );
+export async function listDeals(workspaceId, q = {}) {
+  const page = Math.max(+q.page || 1, 1),
+    limit = Math.min(Math.max(+q.limit || 25, 1), 100),
+    filter = { workspaceId };
+  for (const k of [
+    "pipelineId",
+    "stageId",
+    "status",
+    "ownerId",
+    "contactId",
+    "companyId",
+    "productType",
+  ]) {
+    if (q[k]) filter[k] = q[k];
   }
-
-  if (data.companyId) {
-    const company = await Company.findOne({
-      _id: data.companyId,
-      ownerId
-    });
-
-    if (!company) {
-      throw new AppError(
-        "Company not found.",
-        404,
-        "COMPANY_NOT_FOUND"
-      );
-    }
-  }
-
-  const pipeline = await Pipeline.findOne({
-    _id: data.pipelineId,
-    ownerId,
-    isActive: true
-  });
-
-  if (!pipeline) {
-    throw new AppError(
-      "Pipeline not found.",
-      404,
-      "PIPELINE_NOT_FOUND"
-    );
-  }
-
-  const stage = await PipelineStage.findOne({
-    _id: data.stageId,
-    pipelineId: pipeline._id,
-    isActive: true
-  });
-
-  if (!stage) {
-    throw new AppError(
-      "Pipeline stage does not belong to the selected pipeline.",
-      400,
-      "INVALID_PIPELINE_STAGE"
-    );
-  }
-
-  return {
-    contact,
-    pipeline,
-    stage
-  };
-}
-
-export async function createDeal(data, ownerId) {
-  const { stage } = await validateDealRelations(
-    data,
-    ownerId
-  );
-
-  let status = data.status || "open";
-
-  if (stage.isClosedWon) {
-    status = "won";
-  }
-
-  if (stage.isClosedLost) {
-    status = "lost";
-  }
-
-  const deal = await Deal.create({
-    ...data,
-    status,
-    ownerId,
-    lastActivityAt: new Date()
-  });
-
-  await Activity.create({
-    type: "deal_created",
-    contactId: deal.contactId,
-    companyId: deal.companyId,
-    dealId: deal._id,
-    userId: ownerId,
-    subject: "Deal created",
-    body: `Deal "${deal.title}" was created.`
-  });
-
-  return getDealById(deal._id, ownerId);
-}
-
-export async function getDeals({
-  ownerId,
-  page = 1,
-  limit = 20,
-  search,
-  pipelineId,
-  stageId,
-  status,
-  contactId,
-  companyId
-}) {
-  const skip = (page - 1) * limit;
-
-  const filter = {
-    ownerId
-  };
-
-  if (pipelineId) {
-    filter.pipelineId = pipelineId;
-  }
-
-  if (stageId) {
-    filter.stageId = stageId;
-  }
-
-  if (status) {
-    filter.status = status;
-  }
-
-  if (contactId) {
-    filter.contactId = contactId;
-  }
-
-  if (companyId) {
-    filter.companyId = companyId;
-  }
-
-  if (search?.trim()) {
-    filter.$text = {
-      $search: search.trim()
-    };
-  }
-
-  const [deals, total] = await Promise.all([
+  if (q.search)
+    filter.$or = [
+      { title: { $regex: q.search, $options: "i" } },
+      { source: { $regex: q.search, $options: "i" } },
+    ];
+  const [items, total] = await Promise.all([
     Deal.find(filter)
-      .populate("contactId", "firstName lastName email phone")
-      .populate("companyId", "name")
-      .populate("pipelineId", "name key")
-      .populate(
-        "stageId",
-        "name key sortOrder probability"
-      )
-      .populate("ownerId", "name email")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit),
-
-    Deal.countDocuments(filter)
+      .populate("contactId companyId pipelineId stageId ownerId")
+      .sort({ updatedAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .lean(),
+    Deal.countDocuments(filter),
   ]);
-
   return {
-    deals,
-    pagination: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit)
-    }
+    items,
+    pagination: { page, limit, total, pages: Math.ceil(total / limit) },
   };
 }
-
-export async function getDealById(dealId, ownerId) {
-  const deal = await Deal.findOne({
-    _id: dealId,
-    ownerId
-  })
-    .populate(
-      "contactId",
-      "firstName lastName email phone whatsapp"
-    )
-    .populate("companyId", "name industry website")
-    .populate("pipelineId", "name key")
-    .populate(
-      "stageId",
-      "name key sortOrder probability isClosedWon isClosedLost"
-    )
-    .populate("ownerId", "name email");
-
-  if (!deal) {
-    throw new AppError(
-      "Deal not found.",
-      404,
-      "DEAL_NOT_FOUND"
-    );
-  }
-
-  return deal;
-}
-
-export async function updateDeal(
-  dealId,
-  ownerId,
-  data
-) {
-  const currentDeal = await Deal.findOne({
-    _id: dealId,
-    ownerId
-  });
-
-  if (!currentDeal) {
-    throw new AppError(
-      "Deal not found.",
-      404,
-      "DEAL_NOT_FOUND"
-    );
-  }
-
-  const nextData = {
-    ...data
-  };
-
-  if (
-    data.contactId ||
-    data.companyId ||
-    data.pipelineId ||
-    data.stageId
-  ) {
-    await validateDealRelations(
-      {
-        contactId:
-          data.contactId ?? currentDeal.contactId,
-        companyId:
-          data.companyId ?? currentDeal.companyId,
-        pipelineId:
-          data.pipelineId ?? currentDeal.pipelineId,
-        stageId:
-          data.stageId ?? currentDeal.stageId
-      },
-      ownerId
-    );
-  }
-
-  if (data.stageId) {
-    const stage = await PipelineStage.findById(
-      data.stageId
-    );
-
-    if (stage?.isClosedWon) {
-      nextData.status = "won";
-    } else if (stage?.isClosedLost) {
-      nextData.status = "lost";
-    } else if (!data.status) {
-      nextData.status = "open";
-    }
-  }
-
-  const stageChanged =
-    data.stageId &&
-    data.stageId.toString() !==
-      currentDeal.stageId.toString();
-
-  const deal = await Deal.findOneAndUpdate(
-    {
-      _id: dealId,
-      ownerId
-    },
-    {
-      $set: {
-        ...nextData,
-        lastActivityAt: new Date()
-      }
-    },
-    {
-      new: true,
-      runValidators: true
-    }
+export async function getDeal(workspaceId, id) {
+  const d = await Deal.findOne({ _id: id, workspaceId }).populate(
+    "contactId companyId pipelineId stageId ownerId",
   );
-
-  if (stageChanged) {
-    await Activity.create({
-      type: "stage_change",
-      contactId: deal.contactId,
-      companyId: deal.companyId,
-      dealId: deal._id,
-      userId: ownerId,
-      subject: "Deal stage changed",
-      body: `Deal "${deal.title}" moved to a new pipeline stage.`,
-      metadata: {
-        previousStageId: currentDeal.stageId,
-        newStageId: deal.stageId
-      }
-    });
-  }
-
-  return getDealById(deal._id, ownerId);
+  if (!d) throw new AppError("Deal not found", 404, "NOT_FOUND");
+  return d;
 }
-
-export async function moveDeal(
-  dealId,
-  ownerId,
-  stageId
-) {
-  const deal = await Deal.findOne({
-    _id: dealId,
-    ownerId
-  });
-
-  if (!deal) {
+export async function createDeal(workspaceId, userId, payload) {
+  const [contact, pipeline, stage] = await Promise.all([
+    Contact.findOne({ _id: payload.contactId, workspaceId }),
+    Pipeline.findOne({ _id: payload.pipelineId, workspaceId }),
+    PipelineStage.findOne({
+      _id: payload.stageId,
+      workspaceId,
+      pipelineId: payload.pipelineId,
+    }),
+  ]);
+  if (!contact)
+    throw new AppError("Contact not found", 404, "CONTACT_NOT_FOUND");
+  if (!pipeline)
+    throw new AppError("Pipeline not found", 404, "PIPELINE_NOT_FOUND");
+  if (!stage)
     throw new AppError(
-      "Deal not found.",
-      404,
-      "DEAL_NOT_FOUND"
-    );
-  }
-
-  const stage = await PipelineStage.findOne({
-    _id: stageId,
-    pipelineId: deal.pipelineId,
-    isActive: true
-  });
-
-  if (!stage) {
-    throw new AppError(
-      "The selected stage does not belong to this deal's pipeline.",
+      "Pipeline stage does not belong to this pipeline",
       400,
-      "INVALID_PIPELINE_STAGE"
+      "INVALID_STAGE",
     );
-  }
-
-  let status = "open";
-
-  if (stage.isClosedWon) {
-    status = "won";
-  }
-
-  if (stage.isClosedLost) {
-    status = "lost";
-  }
-
-  deal.stageId = stage._id;
-  deal.status = status;
-  deal.lastActivityAt = new Date();
-
-  await deal.save();
-
+  if (
+    payload.companyId &&
+    !(await Company.exists({ _id: payload.companyId, workspaceId }))
+  )
+    throw new AppError("Company not found", 404, "COMPANY_NOT_FOUND");
+  const d = await Deal.create({
+    ...payload,
+    workspaceId,
+    ownerId: payload.ownerId || userId,
+    stageChangedAt: new Date(),
+  });
   await Activity.create({
-    type: "stage_change",
-    contactId: deal.contactId,
-    companyId: deal.companyId,
-    dealId: deal._id,
-    userId: ownerId,
-    subject: "Deal moved",
-    body: `Deal "${deal.title}" moved to "${stage.name}".`,
-    metadata: {
-      stageId: stage._id,
-      status
-    }
+    workspaceId,
+    userId,
+    type: "deal_created",
+    dealId: d._id,
+    contactId: d.contactId,
+    companyId: d.companyId,
+    subject: "Deal created",
   });
-
-  return getDealById(deal._id, ownerId);
+  return getDeal(workspaceId, d._id);
 }
-
-export async function deleteDeal(dealId, ownerId) {
-  const deal = await Deal.findOne({
-    _id: dealId,
-    ownerId
-  });
-
-  if (!deal) {
-    throw new AppError(
-      "Deal not found.",
-      404,
-      "DEAL_NOT_FOUND"
-    );
+export async function updateDeal(workspaceId, userId, id, payload) {
+  const d = await Deal.findOne({ _id: id, workspaceId });
+  if (!d) throw new AppError("Deal not found", 404, "NOT_FOUND");
+  const patch = { ...payload };
+  delete patch.workspaceId;
+  delete patch.ownerId;
+  if (patch.stageId && String(patch.stageId) !== String(d.stageId)) {
+    const s = await PipelineStage.findOne({
+      _id: patch.stageId,
+      workspaceId,
+      pipelineId: d.pipelineId,
+    });
+    if (!s) throw new AppError("Invalid stage", 400, "INVALID_STAGE");
+    d.stageId = patch.stageId;
+    d.stageChangedAt = new Date();
+    if (s.isClosedWon) d.status = "won";
+    if (s.isClosedLost) d.status = "lost";
+    delete patch.stageId;
   }
-
-  await deal.deleteOne();
-
-  await Activity.deleteMany({
-    dealId: deal._id
+  Object.assign(d, patch);
+  await d.save();
+  await Activity.create({
+    workspaceId,
+    userId,
+    type: "stage_change",
+    dealId: d._id,
+    contactId: d.contactId,
+    companyId: d.companyId,
+    subject: "Deal updated",
+    metadata: { changed: Object.keys(payload) },
   });
-
-  return {
-    id: dealId,
-    deleted: true
-  };
+  return getDeal(workspaceId, id);
+}
+export async function moveDeal(workspaceId, userId, id, stageId) {
+  return updateDeal(workspaceId, userId, id, { stageId });
+}
+export async function deleteDeal(workspaceId, id) {
+  const d = await Deal.findOneAndDelete({ _id: id, workspaceId });
+  if (!d) throw new AppError("Deal not found", 404, "NOT_FOUND");
+  return d;
 }

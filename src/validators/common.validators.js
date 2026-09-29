@@ -1,22 +1,9 @@
 import { z } from "zod";
-
-export const objectIdSchema = z.string().regex(/^[a-fA-F0-9]{24}$/, "Invalid ID");
-
-export function validateBody(schema) {
-  return (req, res, next) => {
-    const result = schema.safeParse(req.body);
-    if (!result.success) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          code: "VALIDATION_ERROR",
-          message: "Request validation failed",
-          details: result.error.flatten()
-        }
-      });
-    }
-
-    req.body = result.data;
-    next();
-  };
-}
+export const objectId = z.string().regex(/^[a-f\d]{24}$/i, "Invalid object id");
+export const paginationSchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  search: z.string().optional(),
+  sort: z.string().optional(),
+  order: z.enum(["asc", "desc"]).default("desc"),
+});

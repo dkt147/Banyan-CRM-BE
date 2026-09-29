@@ -5,31 +5,19 @@ import {
   createActivityController,
   getActivitiesController,
   getActivityController,
-  deleteActivityController
+  deleteActivityController,
 } from "../controllers/activity.controller.js";
 
 const router = Router();
 
 router.use(requireAuth);
 
-router.post(
-  "/",
-  createActivityController
-);
+router.post("/", createActivityController);
 
-router.get(
-  "/",
-  getActivitiesController
-);
+router.get("/", getActivitiesController);
 
-router.get(
-  "/:activityId",
-  getActivityController
-);
+router.get("/:activityId", getActivityController);
 
-router.delete(
-  "/:activityId",
-  deleteActivityController
-);
+router.delete("/:activityId", deleteActivityController);
 
 export default router;

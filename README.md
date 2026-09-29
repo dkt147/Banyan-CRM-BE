@@ -1,45 +1,50 @@
-# Banyan CRM Backend — Phase 1
+# Banyan CRM Backend — Complete Non-AI API
 
-Production-oriented foundation for the Banyan Workspace CRM.
+This is the complete non-AI backend foundation for the Banyan Workspace CRM React application.
 
 ## Stack
-
-- Node.js
-- Express.js
-- MongoDB
-- Mongoose
-- JWT access + refresh authentication
-- bcryptjs
+- Node.js 20+
+- Express 5
+- MongoDB + Mongoose
+- JWT access/refresh authentication
 - Zod validation
-- Helmet
-- CORS
-- express-rate-limit
-- cookie-parser
-- Morgan
+- Helmet, CORS and rate limiting
+- bcryptjs
 
-## Phase 1 scope
+## Scope implemented
+- Authentication and refresh-token rotation
+- Workspace / organization tenancy
+- Team members and role permissions
+- Companies and contacts
+- Pipelines and stages
+- Deals and stage movement
+- Activities and tasks
+- Inbox conversations and messages
+- Email templates
+- Calendar events and booking holds
+- Agreements / signature lifecycle data
+- Invoices and payments
+- Membership plans and memberships
+- Check-ins
+- Loyalty tiers, accounts, ledger and redemptions
+- Automation rules and execution engine
+- Integrations / connection records
+- Notifications
+- Documents / attachments metadata
+- Audit logs
+- Dashboard analytics
+- Provider webhook ingestion boundary
 
-- Express application foundation
-- Environment validation
-- MongoDB connection
-- Security middleware
-- Centralized error handling
-- Health endpoint
-- User model
-- Refresh-token model with correct TTL index
-- Register
-- Login
-- Refresh-token rotation
-- Logout
-- Current-user endpoint
-- HTTP-only refresh cookie
-- Bearer access-token authentication
+AI functionality is intentionally excluded and can be added later without changing the core CRM data model.
+
+## Important integration boundary
+Gmail, WhatsApp Business, Google Calendar, Xero, Stripe, DocuSign, WordPress and access-control systems are represented by internal integration/webhook models and API boundaries. Provider credentials and live API calls are intentionally not hard-coded. They can be connected when the client provides the required credentials and provider-specific requirements.
 
 ## Setup
 
 1. Copy `.env.example` to `.env`.
-2. Set `MONGODB_URI`.
-3. Generate two strong JWT secrets (at least 32 characters).
+2. Set a MongoDB connection string.
+3. Generate long random JWT secrets.
 4. Install dependencies:
 
 ```bash
@@ -52,70 +57,70 @@ npm install
 npm run dev
 ```
 
-API:
+API base URL:
 
 ```text
-http://localhost:5000
+http://localhost:5000/api/v1
 ```
 
-Health:
+## Seed development data
+
+After MongoDB is running:
+
+```bash
+npm run seed
+```
+
+The seed creates an admin account and the four prototype pipelines plus default loyalty tiers.
+
+Development credentials:
 
 ```text
-GET http://localhost:5000/api/v1/health
+Email: admin@banyan.local
+Password: ChangeMe123!
 ```
 
-## Auth endpoints
+Change the password immediately in a real environment.
+
+## Security model
+Every protected business record carries `workspaceId`. The authenticated user also exposes:
 
 ```text
-POST /api/v1/auth/register
-POST /api/v1/auth/login
-POST /api/v1/auth/refresh
-POST /api/v1/auth/logout
-GET  /api/v1/auth/me
+req.user
+req.workspaceId
 ```
 
-### Register
+This prevents users from reading or mutating records belonging to another Banyan workspace.
+
+Roles:
+
+- admin — workspace administration
+- manager — team and operational management
+- operator — day-to-day CRM operations
+
+## Frontend integration
+The React frontend should replace mock actions with REST calls while keeping the current UI information architecture. The API uses JSON and returns a consistent envelope:
 
 ```json
 {
-  "name": "Banyan Admin",
-  "email": "admin@example.com",
-  "password": "StrongPassword123!",
-  "role": "admin"
+  "success": true,
+  "data": {}
 }
 ```
 
-### Login
+Errors use:
 
 ```json
 {
-  "email": "admin@example.com",
-  "password": "StrongPassword123!"
+  "success": false,
+  "code": "VALIDATION_ERROR",
+  "message": "Validation failed.",
+  "details": []
 }
 ```
 
-Login returns an access token and sets the refresh token as an HTTP-only cookie.
+## Validation
+Auth requests use Zod validation. Mongoose validation and the global error handler protect all other resources. Additional endpoint-specific validation can be tightened as frontend payloads are wired into the API.
 
-## Important security notes
-
-- Never commit `.env`.
-- Use long random JWT secrets.
-- In production use HTTPS and `COOKIE_SECURE=true`.
-- If frontend/backend are on different sites, review SameSite/secure cookie settings.
-- Refresh tokens are stored hashed in MongoDB.
-- Refresh-token rotation revokes the previous token.
-- The refresh-token TTL index uses `expiresAt` with `expireAfterSeconds: 0`.
-
-## Next phase
-
-Phase 2 should build the CRM core around the latest Banyan prototype:
-
-- Companies
-- Contacts
-- Pipelines
-- Pipeline stages
-- Deals
-- Activities
-- Tasks
-
-The prototype remains the source of truth for UI and business workflow.
+## AI exclusion
+No AI scoring, summarization, enrichment, recommendations or AI automation is executed by this backend. AI-related frontend copy/data can remain UI-only until the later AI phase.
