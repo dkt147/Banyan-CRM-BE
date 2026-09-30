@@ -124,3 +124,25 @@ Auth requests use Zod validation. Mongoose validation and the global error handl
 
 ## AI exclusion
 No AI scoring, summarization, enrichment, recommendations or AI automation is executed by this backend. AI-related frontend copy/data can remain UI-only until the later AI phase.
+
+
+## Canonical route policy
+
+The backend exposes one canonical route module per CRM domain. Redundant legacy aliases were removed from the mounted application:
+
+- `/companies`
+- `/contacts`
+- `/activities`
+- `/tasks`
+- `/pipelines`
+- `/templates`
+- `/notifications`
+
+The specialized workflow routes are mounted before generic parameter routes where necessary (calendar and invoices) so action endpoints cannot be shadowed.
+
+The following remain backend infrastructure rather than standalone CRM screens:
+- `/` API root
+- `/health`
+- `/webhooks/:provider`
+
+All other mounted domains are represented in the CRM UI.

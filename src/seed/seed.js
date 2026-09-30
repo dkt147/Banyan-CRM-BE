@@ -10,12 +10,16 @@ await connectDatabase();
 let user = await User.findOne({ email: "admin@banyan.local" });
 let workspace = user ? await Workspace.findById(user.workspaceId) : null;
 if (!workspace) {
-  workspace = await Workspace.create({
+  workspace = new Workspace({
     name: "Banyan Workspace",
     slug: "banyan-workspace",
     timezone: "Asia/Hong_Kong",
     currency: "HKD",
   });
+
+
+  await workspace.save({ validateBeforeSave: false });
+
   user = await User.create({
     workspaceId: workspace._id,
     name: "Banyan Admin",
@@ -23,6 +27,7 @@ if (!workspace) {
     passwordHash: await bcrypt.hash("ChangeMe123!", 12),
     role: "admin",
   });
+
   workspace.createdBy = user._id;
   await workspace.save();
 }
