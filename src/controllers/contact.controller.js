@@ -17,7 +17,7 @@ import {
 export async function createContactController(req, res) {
   const data = createContactSchema.parse(req.body);
 
-  const contact = await createContact(data, req.user.id);
+  const contact = await createContact(data, req.user.id, req.user.workspaceId);
 
   return res.status(201).json({
     success: true,
@@ -59,7 +59,7 @@ export async function updateContactController(req, res) {
 
   const data = updateContactSchema.parse(req.body);
 
-  const contact = await updateContact(contactId, req.user.id, data);
+  const contact = await updateContact(contactId, req.user.id, req.user.workspaceId, data);
 
   return res.status(200).json({
     success: true,

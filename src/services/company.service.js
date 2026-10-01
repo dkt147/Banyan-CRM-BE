@@ -3,17 +3,17 @@ import { Contact } from "../models/Contact.js";
 import { Deal } from "../models/Deal.js";
 import { AppError } from "../utils/AppError.js";
 
-export async function createCompany(data, ownerId) {
-  const company = await Company.create({
-    ...data,
-    ownerId,
-  });
+export async function createCompany(data) {
+  console.log("[CREATE COMPANY SERVICE] data:", data);
+
+  const company = await Company.create(data);
 
   return company;
 }
 
 export async function getCompanies({
   ownerId,
+  workspaceId,
   page = 1,
   limit = 20,
   search,
@@ -22,6 +22,7 @@ export async function getCompanies({
   const skip = (page - 1) * limit;
 
   const filter = {
+    workspaceId,
     ownerId,
     isArchived,
   };
@@ -33,7 +34,10 @@ export async function getCompanies({
   }
 
   const [companies, total] = await Promise.all([
-    Company.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Company.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
 
     Company.countDocuments(filter),
   ]);
@@ -49,10 +53,11 @@ export async function getCompanies({
   };
 }
 
-export async function getCompanyById(companyId, ownerId) {
+export async function getCompanyById(companyId, ownerId, workspaceId) {
   const company = await Company.findOne({
     _id: companyId,
     ownerId,
+    workspaceId,
   });
 
   if (!company) {

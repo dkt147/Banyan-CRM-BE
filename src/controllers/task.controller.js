@@ -26,7 +26,7 @@ import {
 export const createTaskController = asyncHandler(async (req, res) => {
   const data = createTaskSchema.parse(req.body);
 
-  const task = await createTask(data, req.user.id);
+  const task = await createTask(data, req.user.id, req.user.workspaceId);
 
   return res.status(201).json({
     success: true,

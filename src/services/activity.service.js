@@ -39,12 +39,13 @@ async function validateRelations(data, userId) {
   }
 }
 
-export async function createActivity(data, userId) {
+export async function createActivity(data, userId, workspaceId) {
   await validateRelations(data, userId);
 
   const activity = await Activity.create({
     ...data,
     userId,
+    workspaceId
   });
 
   if (data.dealId) {

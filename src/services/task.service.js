@@ -40,12 +40,13 @@ async function validateRelations(data, ownerId) {
   }
 }
 
-export async function createTask(data, ownerId) {
+export async function createTask(data, ownerId, workspaceId) {
   await validateRelations(data, ownerId);
 
   const task = await Task.create({
     ...data,
     createdBy: ownerId,
+    workspaceId,
     assignedTo: data.assignedTo || ownerId,
   });
 
@@ -53,6 +54,7 @@ export async function createTask(data, ownerId) {
     type: "task_created",
     contactId: task.contactId,
     companyId: task.companyId,
+    workspaceId: task.workspaceId,
     dealId: task.dealId,
     userId: ownerId,
     subject: "Task created",

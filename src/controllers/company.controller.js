@@ -15,9 +15,15 @@ import {
 } from "../validators/company.validators.js";
 
 export async function createCompanyController(req, res) {
+  console.log("[CREATE COMPANY] req.user:", req.user);
+
   const data = createCompanySchema.parse(req.body);
 
-  const company = await createCompany(data, req.user.id);
+  const company = await createCompany({
+    ...data,
+    ownerId: req.user._id,
+    workspaceId: req.user.workspaceId,
+  });
 
   return res.status(201).json({
     success: true,
@@ -31,7 +37,8 @@ export async function getCompaniesController(req, res) {
 
   const result = await getCompanies({
     ...query,
-    ownerId: req.user.id,
+    ownerId: req.user._id,
+    workspaceId: req.user.workspaceId,
   });
 
   return res.status(200).json({
@@ -45,7 +52,11 @@ export async function getCompaniesController(req, res) {
 export async function getCompanyController(req, res) {
   const { companyId } = companyIdParamSchema.parse(req.params);
 
-  const company = await getCompanyById(companyId, req.user.id);
+  const company = await getCompanyById(
+    companyId,
+    req.user._id,
+    req.user.workspaceId,
+  );
 
   return res.status(200).json({
     success: true,

@@ -2,15 +2,15 @@ import { z } from "zod";
 
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid ID");
 
-const contactTags = [
-  "prospect",
-  "active_member",
-  "past_member",
-  "event_client",
-  "broker_agent",
-  "ngo",
-  "vip",
-];
+  const contactTags = [
+    "prospect",
+    "active_member",
+    "past_member",
+    "event_client",
+    "broker_agent",
+    "ngo",
+    "vip",
+  ];
 
 export const createContactSchema = z.object({
   firstName: z.string().trim().min(1, "First name is required").max(100),

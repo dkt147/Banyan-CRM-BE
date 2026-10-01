@@ -3,11 +3,12 @@ import { Company } from "../models/Company.js";
 import { Deal } from "../models/Deal.js";
 import { AppError } from "../utils/AppError.js";
 
-export async function createContact(data, ownerId) {
+export async function createContact(data, ownerId, workspaceId) {
   if (data.companyId) {
     const company = await Company.findOne({
       _id: data.companyId,
       ownerId,
+      workspaceId
     });
 
     if (!company) {
@@ -18,6 +19,7 @@ export async function createContact(data, ownerId) {
   const contact = await Contact.create({
     ...data,
     ownerId,
+    workspaceId
   });
 
   return contact;
@@ -82,11 +84,12 @@ export async function getContactById(contactId, ownerId) {
   return contact;
 }
 
-export async function updateContact(contactId, ownerId, data) {
+export async function updateContact(contactId, ownerId, workspaceId, data) {
   if (data.companyId) {
     const company = await Company.findOne({
       _id: data.companyId,
       ownerId,
+      workspaceId
     });
 
     if (!company) {

@@ -14,7 +14,7 @@ import {
 export async function createActivityController(req, res) {
   const data = createActivitySchema.parse(req.body);
 
-  const activity = await createActivity(data, req.user.id);
+  const activity = await createActivity(data, req.user.id, req.user.workspaceId);
 
   return res.status(201).json({
     success: true,
