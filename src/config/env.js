@@ -16,4 +16,16 @@ export const env = {
   REFRESH_TOKEN_EXPIRES_IN: process.env.REFRESH_TOKEN_EXPIRES_IN || "30d",
   COOKIE_SECURE: process.env.COOKIE_SECURE === "true",
   COOKIE_SAME_SITE: process.env.COOKIE_SAME_SITE || "lax",
+  // Public HTTPS API origin, without the /api/v1 suffix.
+  PUBLIC_API_URL: (process.env.PUBLIC_API_URL || "").replace(/\/+$/, ""),
+  INTEGRATION_TOKEN_ENCRYPTION_KEY: process.env.INTEGRATION_TOKEN_ENCRYPTION_KEY || "",
+  INTEGRATION_OAUTH_STATE_SECRET: process.env.INTEGRATION_OAUTH_STATE_SECRET || "",
+  STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || "",
+  XERO_CLIENT_ID: process.env.XERO_CLIENT_ID || "",
+  XERO_CLIENT_SECRET: process.env.XERO_CLIENT_SECRET || "",
+  XERO_TENANT_ID: process.env.XERO_TENANT_ID || "",
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || "",
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || "",
+  WHATSAPP_VERIFY_TOKEN: process.env.WHATSAPP_VERIFY_TOKEN || "",
+  META_APP_SECRET: process.env.META_APP_SECRET || "",
 };

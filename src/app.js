@@ -43,13 +43,22 @@ import webhookRoutes from "./routes/webhook.routes.js";
 const app = express();
 app.disable("x-powered-by");
 app.use(...securityMiddleware);
-app.use(express.json({ limit: "2mb" }));
+app.use(
+  express.json({
+    limit: "2mb",
+    // Preserve the original payload for provider webhook signature verification.
+    // Existing controllers continue to receive the same parsed req.body.
+    verify: (req, _res, buffer) => {
+      req.rawBody = Buffer.from(buffer);
+    },
+  }),
+);
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 app.use(cookieParser());
 app.use(morgan("dev"));
 app.get("/", (_req, res) =>
   res.json({
-    success: true,
+    success: true, 
     service: "Banyan CRM API",
     version: "v1",
     message: "API is running.",

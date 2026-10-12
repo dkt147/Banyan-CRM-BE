@@ -94,3 +94,17 @@ Supported internal actions include creating a task, logging an activity and crea
 - GET `/dashboard/revenue`
 - POST `/webhooks/:provider`
 - GET `/health`
+
+## Provider callback and webhook endpoints
+
+- `GET /integrations/callback-urls` — returns callback/webhook URLs derived from `PUBLIC_API_URL` (no credentials exposed).
+- `GET /integrations/xero/connect` — authenticated; returns Xero OAuth authorization URL.
+- `GET /integrations/xero/callback` — Xero OAuth callback.
+- `GET /integrations/google/connect` — authenticated; returns Google OAuth authorization URL.
+- `GET /integrations/google/callback` — Google OAuth callback for Gmail and Calendar.
+- `GET /integrations/docusign/callback` — DocuSign JWT-consent callback landing page.
+- `POST /webhooks/stripe` — validates Stripe-Signature against the raw request body and handles supported payment events.
+- `GET /webhooks/whatsapp` — Meta WhatsApp webhook challenge verification.
+- `POST /webhooks/whatsapp` — validates Meta signature and records inbound webhook payloads.
+
+These routes are added alongside the existing generic integration/webhook routes; generic integration CRUD and generic `POST /webhooks/:provider` remain available.

@@ -38,7 +38,9 @@ This is the complete non-AI backend foundation for the Banyan Workspace CRM Reac
 AI functionality is intentionally excluded and can be added later without changing the core CRM data model.
 
 ## Important integration boundary
-Gmail, WhatsApp Business, Google Calendar, Xero, Stripe, DocuSign, WordPress and access-control systems are represented by internal integration/webhook models and API boundaries. Provider credentials and live API calls are intentionally not hard-coded. They can be connected when the client provides the required credentials and provider-specific requirements.
+Provider credentials are configured outside the source code. This backend now includes Stripe webhook signature verification and handling for supported payment events, Xero OAuth connect/callback, Google OAuth connect/callback for Gmail and Calendar, WhatsApp webhook verification/signature checking/event capture, and a DocuSign consent callback. These routes provide the provider setup endpoints without changing the existing CRM resource architecture.
+
+The wider provider workflows are not yet complete: Stripe PaymentIntent/checkout creation, Xero invoice synchronization and token refresh, Gmail sending/inbox synchronization, Google Calendar event synchronization and token refresh, WhatsApp message sending/CRM synchronization, and DocuSign envelope creation/status synchronization still require provider-specific implementation and testing. WordPress and access-control integrations remain future work.
 
 ## Setup
 
@@ -146,3 +148,30 @@ The following remain backend infrastructure rather than standalone CRM screens:
 - `/webhooks/:provider`
 
 All other mounted domains are represented in the CRM UI.
+
+## Provider callback and webhook endpoints
+
+After deployment, set `PUBLIC_API_URL` to the public HTTPS API origin without `/api/v1` (for example `https://api.example.com`). The read-only endpoint `GET /api/v1/integrations/callback-urls` returns the exact URLs derived from that value.
+
+| Provider | URL path | Purpose |
+| --- | --- | --- |
+| Stripe | `POST /api/v1/webhooks/stripe` | Verifies Stripe signatures against the raw request body, deduplicates events, and applies supported payment-status events to a matching Banyan payment/invoice. |
+| Xero | `GET /api/v1/integrations/xero/callback` | OAuth 2.0 callback; the authenticated `GET /api/v1/integrations/xero/connect` endpoint returns the provider authorization URL. |
+| Google Workspace / Calendar | `GET /api/v1/integrations/google/callback` | OAuth 2.0 callback; the authenticated `GET /api/v1/integrations/google/connect` endpoint returns the provider authorization URL. One authorization saves Gmail and Google Calendar integration records. |
+| WhatsApp Business | `GET /api/v1/webhooks/whatsapp` and `POST /api/v1/webhooks/whatsapp` | Verifies Meta's webhook challenge and request signature, then stores received event payloads. Message synchronization/sending is a separate integration task. |
+| DocuSign | `GET /api/v1/integrations/docusign/callback` | Receives and displays the DocuSign JWT-consent redirect result. Actual envelope sending/signature synchronization still requires provider API implementation. |
+
+### Provider environment variables
+
+- `STRIPE_WEBHOOK_SECRET`: signing secret copied from the configured Stripe webhook endpoint. Keep separate secrets for test and production deployments.
+- `XERO_CLIENT_ID` and `XERO_CLIENT_SECRET`: Xero OAuth application credentials.
+- `XERO_TENANT_ID` (optional): select a specific organisation when the authorized Xero user has access to more than one.
+- `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`: Google OAuth application credentials for Gmail and Google Calendar.
+- `WHATSAPP_VERIFY_TOKEN`: a random verification string entered in Meta's webhook settings.
+- `META_APP_SECRET`: Meta app secret used to verify `X-Hub-Signature-256` on WhatsApp webhook requests.
+- `INTEGRATION_TOKEN_ENCRYPTION_KEY`: exactly 32 bytes represented as 64 hexadecimal characters. Generate one with `openssl rand -hex 32`; do not change it after tokens have been stored unless existing tokens are migrated.
+- `INTEGRATION_OAUTH_STATE_SECRET`: a separate long random secret used to sign short-lived OAuth state tokens. Generate it with `openssl rand -hex 32`.
+
+Register the exact deployed callback/webhook URLs with each provider. Do not use localhost URLs in a provider's cloud configuration. OAuth state is signed and expires after 10 minutes. OAuth tokens are encrypted using AES-256-GCM before they are stored in the existing Integration model.
+
+The provider controllers use Node's built-in `fetch` and crypto APIs; no new NPM dependency is required. Provider secrets must be configured in the deployment environment and must not be committed or placed in a shared document.
