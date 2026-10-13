@@ -64,7 +64,12 @@ async function processStripeEvent(event, eventRecord) {
     "payment_intent.succeeded",
     "payment_intent.payment_failed",
     "charge.refunded",
+    "checkout.session.completed",
+    "checkout.session.async_payment_succeeded",
+    "checkout.session.async_payment_failed",
+    "checkout.session.expired",
   ]);
+
   if (!supported.has(event.type)) {
     eventRecord.status = "ignored";
     eventRecord.error = "Event type is not handled by Banyan.";
@@ -81,71 +86,128 @@ async function processStripeEvent(event, eventRecord) {
     await eventRecord.save();
     return { handled: false, reason: "local_payment_not_found" };
   }
+  eventRecord.workspaceId = payment.workspaceId;
 
-  if (event.type === "payment_intent.succeeded") {
+  const isCheckoutSession = event.type.startsWith("checkout.session.");
+  const isSuccessEvent =
+    event.type === "payment_intent.succeeded" ||
+    event.type === "checkout.session.async_payment_succeeded" ||
+    (event.type === "checkout.session.completed" &&
+      object.payment_status === "paid");
+
+  if (event.type === "checkout.session.completed" && object.payment_status !== "paid") {
+    // Delayed payment methods may complete checkout before the payment settles.
+    // Keep the local payment pending until an async success/failure event arrives.
+    eventRecord.status = "processed";
+    eventRecord.processedAt = new Date();
+    eventRecord.error = "Checkout completed; waiting for final payment status.";
+    await eventRecord.save();
+    return { handled: true, pending: true };
+  }
+
+  if (isSuccessEvent) {
     const wasPaid = payment.status === "succeeded";
     payment.status = "succeeded";
     payment.paidAt =
       payment.paidAt ||
       (event.created ? new Date(event.created * 1000) : new Date());
+    const objectPaymentIntentId =
+      typeof object.id === "string" && object.id.startsWith("pi_")
+        ? object.id
+        : typeof object.payment_intent === "string"
+          ? object.payment_intent
+          : object.payment_intent?.id;
+    if (objectPaymentIntentId) payment.externalId = objectPaymentIntentId;
     payment.metadata = {
       ...(payment.metadata?.toObject
         ? payment.metadata.toObject()
         : payment.metadata || {}),
-      stripePaymentIntentId: object.id,
+      ...(objectPaymentIntentId
+        ? { stripePaymentIntentId: objectPaymentIntentId }
+        : {}),
+      ...(isCheckoutSession && object.id
+        ? { checkoutSessionId: object.id }
+        : {}),
       stripeEventId: event.id,
+      stripeStatus: object.status || "succeeded",
     };
     await payment.save();
 
-    const invoice = await Invoice.findOne({
-      _id: payment.invoiceId,
-      workspaceId: payment.workspaceId,
-    });
-    if (invoice && invoice.status !== "paid") {
-      invoice.status = "paid";
-      invoice.paidAt = payment.paidAt;
-      await invoice.save();
-      if (!wasPaid && invoice.contactId) {
-        try {
-          await earnFromPayment(
-            payment.workspaceId,
-            invoice.createdBy,
-            invoice._id,
-            payment.amount,
-          );
-        } catch (error) {
-          // Payment acknowledgement must not be retried just because loyalty data is unavailable.
-          eventRecord.error =
-            "Payment was applied, but the loyalty reward could not be recorded.";
-          console.error(
-            "Banyan loyalty reward could not be recorded for a Stripe payment.",
-            error?.message || "unknown error",
-          );
-        }
+    // Atomically transition the invoice only once. Stripe can send both
+    // checkout.session.completed and payment_intent.succeeded for the same
+    // payment; concurrent deliveries must not award loyalty points twice.
+    const invoice = await Invoice.findOneAndUpdate(
+      {
+        _id: payment.invoiceId,
+        workspaceId: payment.workspaceId,
+        status: { $ne: "paid" },
+      },
+      { $set: { status: "paid", paidAt: payment.paidAt } },
+      { new: false },
+    );
+    if (invoice && !wasPaid && invoice.contactId) {
+      try {
+        await earnFromPayment(
+          payment.workspaceId,
+          invoice.createdBy,
+          invoice._id,
+          payment.amount,
+        );
+      } catch (error) {
+        // Payment acknowledgement must not be retried because loyalty data failed.
+        eventRecord.error =
+          "Payment was applied, but the loyalty reward could not be recorded.";
+        console.error(
+          "Banyan loyalty reward could not be recorded for a Stripe payment.",
+          error?.message || "unknown error",
+        );
       }
     }
-  } else if (event.type === "payment_intent.payment_failed") {
-    payment.status = "failed";
+  } else if (
+    event.type === "payment_intent.payment_failed" ||
+    event.type === "checkout.session.async_payment_failed" ||
+    event.type === "checkout.session.expired"
+  ) {
+    // A PaymentIntent can fail while the customer remains in a hosted Checkout
+    // Session and retries with another card. Keep that session pending and reuse
+    // it rather than creating a second payable session for the same invoice.
+    const checkoutSessionId = payment.metadata?.checkoutSessionId;
+    if (event.type === "payment_intent.payment_failed" && checkoutSessionId) {
+      if (payment.status !== "succeeded" && payment.status !== "refunded") {
+        payment.status = "pending";
+      }
+    } else if (payment.status !== "succeeded" && payment.status !== "refunded") {
+      payment.status = "failed";
+    }
     payment.metadata = {
       ...(payment.metadata?.toObject
         ? payment.metadata.toObject()
         : payment.metadata || {}),
-      stripePaymentIntentId: object.id,
       stripeEventId: event.id,
-      lastPaymentError:
-        object.last_payment_error?.code ||
-        object.last_payment_error?.type ||
-        "payment_failed",
+      ...(event.type === "payment_intent.payment_failed"
+        ? {
+            lastPaymentError:
+              object.last_payment_error?.code ||
+              object.last_payment_error?.type ||
+              "payment_failed",
+          }
+        : { checkoutEventType: event.type }),
     };
     await payment.save();
   } else if (event.type === "charge.refunded") {
-    payment.status = "refunded";
+    const fullyRefunded =
+      object.refunded === true ||
+      (Number(object.amount) > 0 &&
+        Number(object.amount_refunded) >= Number(object.amount));
+    if (fullyRefunded) payment.status = "refunded";
     payment.metadata = {
       ...(payment.metadata?.toObject
         ? payment.metadata.toObject()
         : payment.metadata || {}),
       stripeChargeId: object.id,
       stripeEventId: event.id,
+      stripeRefundedAmount: object.amount_refunded,
+      stripeRefundedCurrency: object.currency,
     };
     await payment.save();
   }

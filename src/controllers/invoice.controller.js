@@ -9,12 +9,26 @@ export const markPaid = asyncHandler(async (req, res) => {
     workspaceId: req.workspaceId,
   });
   if (!inv) throw new AppError("Invoice not found", 404, "NOT_FOUND");
+  const provider = String(req.body.provider || inv.provider || "manual").toLowerCase();
+  const stripePaymentInProgress = await Payment.exists({
+    workspaceId: req.workspaceId,
+    invoiceId: inv._id,
+    provider: "stripe",
+    status: { $in: ["pending", "succeeded"] },
+  });
+  if (provider === "stripe" || stripePaymentInProgress) {
+    throw new AppError(
+      "Stripe payments must be completed through Checkout and confirmed by the Stripe webhook.",
+      409,
+      "STRIPE_PAYMENT_WEBHOOK_MANAGED",
+    );
+  }
   if (inv.status === "paid") return res.json({ success: true, data: inv });
   const amount = req.body.amount ?? inv.total;
   const payment = await Payment.create({
     workspaceId: req.workspaceId,
     invoiceId: inv._id,
-    provider: req.body.provider || "stripe",
+    provider: req.body.provider || inv.provider || "manual",
     externalId: req.body.externalId,
     amount,
     currency: inv.currency,
