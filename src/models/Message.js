@@ -20,7 +20,7 @@ const schema = new mongoose.Schema(
     sentAt: { type: Date, default: Date.now, index: true },
     status: {
       type: String,
-      enum: ["queued", "sent", "delivered", "read", "failed"],
+      enum: ["queued", "received", "sent", "delivered", "read", "failed"],
       default: "sent",
     },
     templateId: { type: mongoose.Schema.Types.ObjectId, ref: "Template" },

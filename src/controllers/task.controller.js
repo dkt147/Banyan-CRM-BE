@@ -18,7 +18,6 @@ import {
   taskListQuerySchema,
 } from "../validators/task.validators.js";
 
-
 /**
  * Create Task
  * POST /tasks
@@ -118,11 +117,7 @@ export const snoozeTaskController = asyncHandler(async (req, res) => {
 
   const { snoozedUntil } = snoozeTaskSchema.parse(req.body);
 
-  const task = await snoozeTask(
-    taskId,
-    req.user.id,
-    snoozedUntil,
-  );
+  const task = await snoozeTask(taskId, req.user.id, snoozedUntil);
 
   return res.status(200).json({
     success: true,
@@ -146,4 +141,3 @@ export const deleteTaskController = asyncHandler(async (req, res) => {
     data: result,
   });
 });
-
