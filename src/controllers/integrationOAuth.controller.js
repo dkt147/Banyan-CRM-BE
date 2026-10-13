@@ -96,7 +96,11 @@ function verifyOAuthState(value, expectedProvider) {
       issuer: OAUTH_ISSUER,
     });
   } catch {
-    throw new AppError("OAuth state is invalid or expired.", 400, "INVALID_OAUTH_STATE");
+    throw new AppError(
+      "OAuth state is invalid or expired.",
+      400,
+      "INVALID_OAUTH_STATE",
+    );
   }
   if (
     state.type !== "integration_state" ||
@@ -104,7 +108,11 @@ function verifyOAuthState(value, expectedProvider) {
     !state.sub ||
     !state.workspaceId
   ) {
-    throw new AppError("OAuth state does not match this integration.", 400, "INVALID_OAUTH_STATE");
+    throw new AppError(
+      "OAuth state does not match this integration.",
+      400,
+      "INVALID_OAUTH_STATE",
+    );
   }
   return state;
 }
@@ -112,11 +120,15 @@ function verifyOAuthState(value, expectedProvider) {
 function callbackPage(res, success, title, message) {
   const statusCode = success ? 200 : 400;
   const safeTitle = success ? title : "Connection not completed";
-  const safeMessage = success ? message : "Authorization could not be completed. Return to Banyan and check the integration configuration, then try again.";
+  const safeMessage = success
+    ? message
+    : "Authorization could not be completed. Return to Banyan and check the integration configuration, then try again.";
   res
     .status(statusCode)
     .type("html")
-    .send(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle}</title><style>body{font:16px system-ui,sans-serif;max-width:640px;margin:10vh auto;padding:24px;color:#1f2937}main{border:1px solid #e5e7eb;border-radius:12px;padding:28px}h1{font-size:1.4rem}p{line-height:1.6}</style></head><body><main><h1>${safeTitle}</h1><p>${safeMessage}</p><p>You may close this window and return to Banyan.</p></main></body></html>`);
+    .send(
+      `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${safeTitle}</title><style>body{font:16px system-ui,sans-serif;max-width:640px;margin:10vh auto;padding:24px;color:#1f2937}main{border:1px solid #e5e7eb;border-radius:12px;padding:28px}h1{font-size:1.4rem}p{line-height:1.6}</style></head><body><main><h1>${safeTitle}</h1><p>${safeMessage}</p><p>You may close this window and return to Banyan.</p></main></body></html>`,
+    );
 }
 
 async function responseJson(response, provider, action) {
@@ -132,7 +144,15 @@ async function responseJson(response, provider, action) {
   return body;
 }
 
-async function saveIntegration({ workspaceId, userId, provider, accountName, externalAccountId, tokens, config = {} }) {
+async function saveIntegration({
+  workspaceId,
+  userId,
+  provider,
+  accountName,
+  externalAccountId,
+  tokens,
+  config = {},
+}) {
   const set = {
     status: "connected",
     accountName: accountName || provider,
@@ -187,7 +207,11 @@ export const callbackUrls = (_req, res) => {
 };
 
 export const startXeroConnect = asyncHandler(async (req, res) => {
-  requiredEnv("XERO_CLIENT_ID", "XERO_CLIENT_SECRET", "INTEGRATION_OAUTH_STATE_SECRET");
+  requiredEnv(
+    "XERO_CLIENT_ID",
+    "XERO_CLIENT_SECRET",
+    "INTEGRATION_OAUTH_STATE_SECRET",
+  );
   assertIntegrationEncryptionConfigured();
   const redirectUri = callbackUri("xero");
   const state = createOAuthState(req.user, "xero");
@@ -210,14 +234,30 @@ export const startXeroConnect = asyncHandler(async (req, res) => {
 
 export const xeroCallback = asyncHandler(async (req, res) => {
   if (req.query.error) {
-    return callbackPage(res, false, "Xero authorization cancelled", "Xero authorization was cancelled or denied.");
+    return callbackPage(
+      res,
+      false,
+      "Xero authorization cancelled",
+      "Xero authorization was cancelled or denied.",
+    );
   }
-  requiredEnv("XERO_CLIENT_ID", "XERO_CLIENT_SECRET", "INTEGRATION_OAUTH_STATE_SECRET");
+  requiredEnv(
+    "XERO_CLIENT_ID",
+    "XERO_CLIENT_SECRET",
+    "INTEGRATION_OAUTH_STATE_SECRET",
+  );
   assertIntegrationEncryptionConfigured();
-  if (!req.query.code) throw new AppError("Xero authorization code is missing.", 400, "OAUTH_CODE_REQUIRED");
+  if (!req.query.code)
+    throw new AppError(
+      "Xero authorization code is missing.",
+      400,
+      "OAUTH_CODE_REQUIRED",
+    );
   const state = verifyOAuthState(req.query.state, "xero");
   const redirectUri = callbackUri("xero");
-  const basic = Buffer.from(`${env.XERO_CLIENT_ID}:${env.XERO_CLIENT_SECRET}`).toString("base64");
+  const basic = Buffer.from(
+    `${env.XERO_CLIENT_ID}:${env.XERO_CLIENT_SECRET}`,
+  ).toString("base64");
   const tokenResponse = await fetch("https://identity.xero.com/connect/token", {
     method: "POST",
     headers: {
@@ -232,12 +272,24 @@ export const xeroCallback = asyncHandler(async (req, res) => {
     }),
   });
   const tokens = await responseJson(tokenResponse, "Xero", "token exchange");
-  if (!tokens.access_token) throw new AppError("Xero did not return an access token.", 502, "XERO_TOKEN_MISSING");
+  if (!tokens.access_token)
+    throw new AppError(
+      "Xero did not return an access token.",
+      502,
+      "XERO_TOKEN_MISSING",
+    );
 
   const connectionsResponse = await fetch("https://api.xero.com/connections", {
-    headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: "application/json" },
+    headers: {
+      Authorization: `Bearer ${tokens.access_token}`,
+      Accept: "application/json",
+    },
   });
-  const connections = await responseJson(connectionsResponse, "Xero", "organisation lookup");
+  const connections = await responseJson(
+    connectionsResponse,
+    "Xero",
+    "organisation lookup",
+  );
   const tenants = Array.isArray(connections) ? connections : [];
   const tenant = env.XERO_TENANT_ID
     ? tenants.find((item) => item.tenantId === env.XERO_TENANT_ID)
@@ -245,9 +297,10 @@ export const xeroCallback = asyncHandler(async (req, res) => {
       ? tenants[0]
       : null;
   if (!tenant?.tenantId) {
-    const message = tenants.length > 1
-      ? "More than one Xero organisation is connected. Set XERO_TENANT_ID to the intended tenant and retry the connection."
-      : "No Xero organisation was selected or connected to this account.";
+    const message =
+      tenants.length > 1
+        ? "More than one Xero organisation is connected. Set XERO_TENANT_ID to the intended tenant and retry the connection."
+        : "No Xero organisation was selected or connected to this account.";
     throw new AppError(message, 400, "XERO_TENANT_NOT_FOUND");
   }
 
@@ -265,11 +318,20 @@ export const xeroCallback = asyncHandler(async (req, res) => {
       scope: XERO_SCOPES.join(" "),
     },
   });
-  return callbackPage(res, true, "Xero connected", "Your Xero organisation has been connected to Banyan.");
+  return callbackPage(
+    res,
+    true,
+    "Xero connected",
+    "Your Xero organisation has been connected to Banyan.",
+  );
 });
 
 export const startGoogleConnect = asyncHandler(async (req, res) => {
-  requiredEnv("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "INTEGRATION_OAUTH_STATE_SECRET");
+  requiredEnv(
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "INTEGRATION_OAUTH_STATE_SECRET",
+  );
   assertIntegrationEncryptionConfigured();
   const redirectUri = callbackUri("google");
   const state = createOAuthState(req.user, "google");
@@ -296,16 +358,33 @@ export const startGoogleConnect = asyncHandler(async (req, res) => {
 
 export const googleCallback = asyncHandler(async (req, res) => {
   if (req.query.error) {
-    return callbackPage(res, false, "Google authorization cancelled", "Google authorization was cancelled or denied.");
+    return callbackPage(
+      res,
+      false,
+      "Google authorization cancelled",
+      "Google authorization was cancelled or denied.",
+    );
   }
-  requiredEnv("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "INTEGRATION_OAUTH_STATE_SECRET");
+  requiredEnv(
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "INTEGRATION_OAUTH_STATE_SECRET",
+  );
   assertIntegrationEncryptionConfigured();
-  if (!req.query.code) throw new AppError("Google authorization code is missing.", 400, "OAUTH_CODE_REQUIRED");
+  if (!req.query.code)
+    throw new AppError(
+      "Google authorization code is missing.",
+      400,
+      "OAUTH_CODE_REQUIRED",
+    );
   const state = verifyOAuthState(req.query.state, "google");
   const redirectUri = callbackUri("google");
   const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
     body: new URLSearchParams({
       code: String(req.query.code),
       client_id: env.GOOGLE_CLIENT_ID,
@@ -315,12 +394,27 @@ export const googleCallback = asyncHandler(async (req, res) => {
     }),
   });
   const tokens = await responseJson(tokenResponse, "Google", "token exchange");
-  if (!tokens.access_token) throw new AppError("Google did not return an access token.", 502, "GOOGLE_TOKEN_MISSING");
+  if (!tokens.access_token)
+    throw new AppError(
+      "Google did not return an access token.",
+      502,
+      "GOOGLE_TOKEN_MISSING",
+    );
 
-  const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v2/userinfo", {
-    headers: { Authorization: `Bearer ${tokens.access_token}`, Accept: "application/json" },
-  });
-  const userInfo = await responseJson(userInfoResponse, "Google", "account lookup");
+  const userInfoResponse = await fetch(
+    "https://www.googleapis.com/oauth2/v2/userinfo",
+    {
+      headers: {
+        Authorization: `Bearer ${tokens.access_token}`,
+        Accept: "application/json",
+      },
+    },
+  );
+  const userInfo = await responseJson(
+    userInfoResponse,
+    "Google",
+    "account lookup",
+  );
   const accountName = userInfo.email || "Google account";
   const config = {
     googleAccountId: userInfo.id || "",
@@ -348,12 +442,28 @@ export const googleCallback = asyncHandler(async (req, res) => {
       config: { ...config, purpose: "google_calendar" },
     }),
   ]);
-  return callbackPage(res, true, "Google connected", "Google Workspace and Calendar authorization has been saved to Banyan.");
+  return callbackPage(
+    res,
+    true,
+    "Google connected",
+    "Google Workspace and Calendar authorization has been saved to Banyan.",
+  );
 });
 
 export const docusignCallback = (req, res) => {
   if (req.query.error || !req.query.code) {
-    return callbackPage(res, false, "DocuSign consent not completed", "DocuSign did not return a consent confirmation. Return to Banyan and retry the consent step.");
+    return callbackPage(
+      res,
+      false,
+      "DocuSign consent not completed",
+      "DocuSign did not return a consent confirmation. Return to Banyan and retry the consent step.",
+    );
   }
-  return callbackPage(res, true, "DocuSign consent received", "DocuSign returned the consent callback. You can return to Banyan.");
+  verifyOAuthState(req.query.state, "docusign");
+  return callbackPage(
+    res,
+    true,
+    "DocuSign consent received",
+    "DocuSign consent was received. The backend can now use the configured JWT grant to request API access.",
+  );
 };
