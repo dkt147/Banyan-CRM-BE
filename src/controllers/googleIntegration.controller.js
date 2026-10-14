@@ -50,7 +50,8 @@ async function googleRequest(workspaceId, provider, url, options = {}) {
 
 export const sendGmailMessage = asyncHandler(async (req, res) => {
   const to = gmailHeader(req.body?.to, "to");
-  const subject = encodeSubject(req.body?.subject);
+  const subjectText = String(req.body?.subject || "").trim();
+  const subject = encodeSubject(subjectText);
   const bodyText = String(req.body?.text || req.body?.body || "");
   if (!bodyText.trim())
     throw new AppError("text is required.", 400, "EMAIL_BODY_REQUIRED");
@@ -63,9 +64,37 @@ export const sendGmailMessage = asyncHandler(async (req, res) => {
     conversation = await Conversation.findOne({
       _id: req.body.conversationId,
       workspaceId: req.workspaceId,
+      channel: "email",
     });
     if (!conversation)
-      throw new AppError("Conversation not found.", 404, "NOT_FOUND");
+      throw new AppError("Email conversation not found.", 404, "NOT_FOUND");
+  }
+
+  const replyHeaders = [];
+  if (conversation?.externalThreadId) {
+    const previousMessage = await Message.findOne({
+      workspaceId: req.workspaceId,
+      conversationId: conversation._id,
+      "metadata.provider": "gmail",
+      "metadata.gmailMessageId": { $exists: true },
+    }).sort({ sentAt: -1 });
+    if (previousMessage?.metadata?.gmailMessageId) {
+      try {
+        const previous = await googleRequest(
+          req.workspaceId,
+          "gmail",
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(previousMessage.metadata.gmailMessageId)}?format=metadata&metadataHeaders=Message-ID&metadataHeaders=References`,
+        );
+        const messageId = headerValue(previous, "Message-ID");
+        const references = headerValue(previous, "References");
+        if (messageId) {
+          replyHeaders.push(`In-Reply-To: ${gmailHeader(messageId, "In-Reply-To")}`);
+          replyHeaders.push(`References: ${gmailHeader([references, messageId].filter(Boolean).join(" "), "References")}`);
+        }
+      } catch {
+        // Sending may still proceed with the Gmail thread ID if header lookup fails.
+      }
+    }
   }
 
   const mime = [
@@ -73,6 +102,7 @@ export const sendGmailMessage = asyncHandler(async (req, res) => {
     ...(cc ? [`Cc: ${cc}`] : []),
     ...(bcc ? [`Bcc: ${bcc}`] : []),
     ...(from ? [`From: ${gmailHeader(from, "from")}`] : []),
+    ...replyHeaders,
     `Subject: ${subject}`,
     "MIME-Version: 1.0",
     "Content-Type: text/plain; charset=UTF-8",
@@ -81,51 +111,87 @@ export const sendGmailMessage = asyncHandler(async (req, res) => {
     Buffer.from(bodyText, "utf8").toString("base64"),
   ].join("\r\n");
 
+  const sendBody = { raw: Buffer.from(mime, "utf8").toString("base64url") };
+  // Gmail threading requires the thread ID plus compatible reply headers.
+  if (conversation?.externalThreadId) sendBody.threadId = conversation.externalThreadId;
   const result = await googleRequest(
     req.workspaceId,
     "gmail",
     "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-    {
-      method: "POST",
-      body: JSON.stringify({
-        raw: Buffer.from(mime, "utf8").toString("base64url"),
-      }),
-    },
+    { method: "POST", body: JSON.stringify(sendBody) },
   );
 
-  let savedMessage = null;
-  if (conversation) {
-    savedMessage = await Message.create({
-      workspaceId: req.workspaceId,
-      conversationId: conversation._id,
-      direction: "outbound",
-      senderName: req.user.name,
-      senderAddress: from || req.user.email,
-      body: bodyText,
-      status: "sent",
-      metadata: {
-        provider: "gmail",
-        gmailMessageId: result.id,
-        gmailThreadId: result.threadId,
-        to,
-        subject: req.body.subject,
+  const sentAt = new Date();
+  if (!conversation) {
+    const recipient = String(to).split(",")[0].trim();
+    const recipientEmail = parseEmailAddress(recipient);
+    const contact = recipientEmail
+      ? await Contact.findOne({ workspaceId: req.workspaceId, email: recipientEmail })
+      : null;
+    const threadId = result.threadId || result.id;
+    conversation = await Conversation.findOneAndUpdate(
+      { workspaceId: req.workspaceId, channel: "email", externalThreadId: threadId },
+      {
+        $setOnInsert: {
+          workspaceId: req.workspaceId,
+          channel: "email",
+          externalThreadId: threadId,
+          contactId: contact?._id,
+          participantName: contact
+            ? `${contact.firstName || ""} ${contact.lastName || ""}`.trim()
+            : recipient,
+          participantAddress: recipientEmail || recipient,
+          status: "open",
+        },
+        $set: { subject: subjectText, lastMessageAt: sentAt },
       },
-    });
-    conversation.lastMessageAt = new Date();
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+  } else {
+    conversation.lastMessageAt = sentAt;
+    conversation.subject = subjectText || conversation.subject;
+    if (!conversation.externalThreadId && result.threadId) {
+      conversation.externalThreadId = result.threadId;
+    }
     await conversation.save();
   }
 
-  res
-    .status(201)
-    .json({
-      success: true,
-      data: {
-        id: result.id,
-        threadId: result.threadId,
-        labelIds: result.labelIds || [],
-        message: savedMessage,
-      },
-    });
+  const savedMessage = await Message.create({
+    workspaceId: req.workspaceId,
+    conversationId: conversation._id,
+    direction: "outbound",
+    senderName: req.user?.name || from || "Banyan user",
+    senderAddress: from || req.user?.email || "",
+    body: bodyText,
+    sentAt,
+    status: "sent",
+    metadata: {
+      provider: "gmail",
+      gmailMessageId: result.id,
+      gmailThreadId: result.threadId || conversation.externalThreadId || "",
+      to,
+      subject: subjectText,
+      cc,
+      bcc,
+    },
+  });
+
+  await Integration.updateOne(
+    { workspaceId: req.workspaceId, provider: "gmail" },
+    { $set: { lastSyncedAt: sentAt } },
+  );
+
+  res.status(201).json({
+    success: true,
+    data: {
+      id: result.id,
+      threadId: result.threadId,
+      conversationId: conversation._id,
+      conversation,
+      labelIds: result.labelIds || [],
+      message: savedMessage,
+    },
+  });
 });
 
 function decodeGmailBody(data) {
@@ -280,7 +346,6 @@ export const syncGmailInbox = asyncHandler(async (req, res) => {
             contactId: contact?._id,
             participantName,
             participantAddress: participantEmail || fromEmail,
-            subject,
             status: "open",
           },
           $set: { lastMessageAt: sentAt, subject },
@@ -418,6 +483,111 @@ export const listGoogleCalendarEvents = asyncHandler(async (req, res) => {
     { $set: { lastSyncedAt: new Date() } },
   );
   res.json({ success: true, data: result });
+});
+
+export const syncGoogleCalendarEvents = asyncHandler(async (req, res) => {
+  const fromValue = req.body?.timeMin || req.query.timeMin;
+  const toValue = req.body?.timeMax || req.query.timeMax;
+  const from = fromValue ? new Date(fromValue) : new Date(Date.now() - 30 * 86400000);
+  const to = toValue ? new Date(toValue) : new Date(Date.now() + 180 * 86400000);
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || from >= to) {
+    throw new AppError(
+      "Valid timeMin and timeMax values are required; timeMin must be before timeMax.",
+      400,
+      "INVALID_TIME_RANGE",
+    );
+  }
+
+  const calendarId = env.GOOGLE_CALENDAR_ID || "primary";
+  const url = calendarEventsUrl(calendarId, {
+    timeMin: from.toISOString(),
+    timeMax: to.toISOString(),
+    singleEvents: true,
+    orderBy: "startTime",
+    showDeleted: true,
+    maxResults: Math.min(Math.max(Number(req.body?.maxResults || req.query.maxResults) || 250, 1), 2500),
+  });
+  const result = await googleRequest(req.workspaceId, "google_calendar", url);
+  const externalEvents = result.items || [];
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const external of externalEvents) {
+    if (!external.id) { skipped += 1; continue; }
+    const existing = await CalendarEvent.findOne({
+      workspaceId: req.workspaceId,
+      externalProvider: "google_calendar",
+      externalEventId: external.id,
+    });
+
+    if (external.status === "cancelled") {
+      if (existing && existing.status !== "cancelled") {
+        existing.status = "cancelled";
+        existing.metadata = {
+          ...(existing.metadata?.toObject ? existing.metadata.toObject() : existing.metadata || {}),
+          googleEventStatus: "cancelled",
+          googleSyncedAt: new Date(),
+        };
+        await existing.save();
+        updated += 1;
+      } else skipped += 1;
+      continue;
+    }
+
+    const startValue = external.start?.dateTime || (external.start?.date ? `${external.start.date}T00:00:00.000Z` : null);
+    const endValue = external.end?.dateTime || (external.end?.date ? `${external.end.date}T00:00:00.000Z` : null);
+    const startAt = startValue ? new Date(startValue) : null;
+    const endAt = endValue ? new Date(endValue) : null;
+    if (!startAt || !endAt || Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt <= startAt) {
+      skipped += 1;
+      continue;
+    }
+
+    const set = {
+      title: String(external.summary || "(No title)").slice(0, 250),
+      type: "meeting",
+      startAt,
+      endAt,
+      timezone: external.start?.timeZone || env.GOOGLE_CALENDAR_TIMEZONE || "UTC",
+      location: String(external.location || "").slice(0, 1000),
+      status: "scheduled",
+      notes: String(external.description || "").slice(0, 10000),
+      externalProvider: "google_calendar",
+      externalEventId: external.id,
+      metadata: {
+        googleCalendarId: calendarId,
+        googleEventHtmlLink: external.htmlLink || "",
+        googleEventStatus: external.status || "confirmed",
+        googleUpdatedAt: external.updated || null,
+        googleSyncedAt: new Date(),
+        googleAllDay: Boolean(external.start?.date),
+      },
+    };
+    const saved = await CalendarEvent.findOneAndUpdate(
+      { workspaceId: req.workspaceId, externalProvider: "google_calendar", externalEventId: external.id },
+      { $set: set, $setOnInsert: { workspaceId: req.workspaceId } },
+      { new: true, upsert: true, setDefaultsOnInsert: true, runValidators: true },
+    );
+    if (existing) updated += 1; else created += 1;
+  }
+
+  await Integration.updateOne(
+    { workspaceId: req.workspaceId, provider: "google_calendar" },
+    { $set: { lastSyncedAt: new Date() } },
+  );
+  res.json({
+    success: true,
+    data: {
+      fetched: externalEvents.length,
+      created,
+      updated,
+      skipped,
+      nextPageToken: result.nextPageToken || null,
+      timeMin: from.toISOString(),
+      timeMax: to.toISOString(),
+    },
+  });
 });
 
 export const syncGoogleCalendarEvent = asyncHandler(async (req, res) => {

@@ -17,6 +17,7 @@ import {
   getGmailMessage,
   listGoogleCalendarEvents,
   syncGoogleCalendarEvent,
+  syncGoogleCalendarEvents,
 } from "../controllers/googleIntegration.controller.js";
 import {
   syncXeroInvoice,
@@ -49,6 +50,7 @@ r.post("/google/gmail/sync", requireAuth, syncGmailInbox);
 r.get("/google/gmail/messages", requireAuth, listGmailMessages);
 r.get("/google/gmail/messages/:messageId", requireAuth, getGmailMessage);
 r.get("/google/calendar/events", requireAuth, listGoogleCalendarEvents);
+r.post("/google/calendar/sync", requireAuth, syncGoogleCalendarEvents);
 r.post(
   "/google/calendar/events/:eventId/sync",
   requireAuth,

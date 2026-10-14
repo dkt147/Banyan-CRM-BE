@@ -31,21 +31,36 @@ const GOOGLE_SCOPES = [
 
 function publicApiUrl() {
   const base = (env.PUBLIC_API_URL || "").replace(/\/+$/, "");
-  let validOrigin = false;
+  let validHttpsOrigin = false;
   try {
     const parsed = new URL(base);
-    validOrigin = parsed.protocol === "https:" && parsed.origin === base;
+    validHttpsOrigin = parsed.protocol === "https:" && parsed.origin === base;
   } catch {
-    validOrigin = false;
+    validHttpsOrigin = false;
   }
-  if (!validOrigin) {
-    throw new AppError(
-      "PUBLIC_API_URL must be set to the deployed HTTPS API origin without a path.",
-      503,
-      "PUBLIC_API_URL_NOT_CONFIGURED",
-    );
+  if (validHttpsOrigin) return base;
+
+  // Google permits plain HTTP redirect URIs for localhost in development.
+  // This lets the OAuth callback work before Banyan is deployed. Production
+  // must use PUBLIC_API_URL with a public HTTPS origin.
+  if (!base && env.NODE_ENV !== "production") {
+    return `http://localhost:${env.PORT}`;
   }
-  return base;
+
+  throw new AppError(
+    "PUBLIC_API_URL must be set to the deployed HTTPS API origin without a path. For local development, leave it empty and use localhost.",
+    503,
+    "PUBLIC_API_URL_NOT_CONFIGURED",
+  );
+}
+
+function googleCallbackPage(res, success, _title, _message) {
+  // Return to a React route instead of using inline JavaScript, which is blocked
+  // by the backend's default Helmet Content-Security-Policy. The popup route
+  // posts the result to its opener after the frontend loads.
+  const redirect = new URL("/integrations", env.CLIENT_URL);
+  redirect.searchParams.set("google_oauth", success ? "success" : "error");
+  return res.redirect(302, redirect.toString());
 }
 
 function callbackUri(provider) {
@@ -184,19 +199,21 @@ async function saveIntegration({
 }
 
 export const callbackUrls = (_req, res) => {
-  const base = (env.PUBLIC_API_URL || "").replace(/\/+$/, "");
-  let isHttpsOrigin = false;
+  let base = null;
+  let isProductionHttps = false;
   try {
+    base = publicApiUrl();
     const parsed = new URL(base);
-    isHttpsOrigin = parsed.protocol === "https:" && parsed.origin === base;
+    isProductionHttps = parsed.protocol === "https:";
   } catch {
-    isHttpsOrigin = false;
+    base = null;
   }
-  const url = (path) => (isHttpsOrigin ? `${base}${path}` : null);
+  const url = (path) => (base ? `${base}${path}` : null);
   res.json({
     success: true,
     data: {
-      publicApiUrlConfigured: isHttpsOrigin,
+      publicApiUrlConfigured: isProductionHttps,
+      localDevelopment: Boolean(base && !isProductionHttps),
       stripeWebhookUrl: url("/api/v1/webhooks/stripe"),
       xeroRedirectUri: url("/api/v1/integrations/xero/callback"),
       googleRedirectUri: url("/api/v1/integrations/google/callback"),
@@ -358,7 +375,7 @@ export const startGoogleConnect = asyncHandler(async (req, res) => {
 
 export const googleCallback = asyncHandler(async (req, res) => {
   if (req.query.error) {
-    return callbackPage(
+    return googleCallbackPage(
       res,
       false,
       "Google authorization cancelled",
@@ -442,7 +459,7 @@ export const googleCallback = asyncHandler(async (req, res) => {
       config: { ...config, purpose: "google_calendar" },
     }),
   ]);
-  return callbackPage(
+  return googleCallbackPage(
     res,
     true,
     "Google connected",
