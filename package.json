@@ -8,7 +8,8 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "check": "node --check src/server.js",
-    "seed": "node src/seed/seed.js"
+    "seed": "node src/seed/seed.js",
+    "setup:website-enquiries": "node src/scripts/setupWebsiteEnquiryPipelines.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
@@ -23,5 +24,7 @@
     "morgan": "^1.10.0",
     "zod": "^4.1.5"
   },
-  "devDependencies": { "nodemon": "^3.1.10" }
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
 }

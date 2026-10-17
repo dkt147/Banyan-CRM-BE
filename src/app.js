@@ -1,4 +1,5 @@
 import express from "express";
+import { env } from "./config/env.js";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import { securityMiddleware } from "./middleware/security.middleware.js";
@@ -39,9 +40,11 @@ import documentRoutes from "./routes/documents.routes.js";
 import auditLogRoutes from "./routes/auditLogs.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import webhookRoutes from "./routes/webhook.routes.js";
+import publicEnquiryRoutes from "./routes/publicEnquiries.routes.js";
 
 const app = express();
 app.disable("x-powered-by");
+if (env.TRUST_PROXY_HOPS > 0) app.set("trust proxy", env.TRUST_PROXY_HOPS);
 app.use(...securityMiddleware);
 app.use(
   express.json({
@@ -65,6 +68,7 @@ app.get("/", (_req, res) =>
   }),
 );
 app.use("/api/v1/health", healthRoutes);
+app.use("/api/v1/public/enquiries", publicEnquiryRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/workspace", workspaceRoutes);
 app.use("/api/v1/members", memberRoutes);

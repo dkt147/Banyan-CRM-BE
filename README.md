@@ -41,7 +41,7 @@ AI functionality is intentionally excluded and can be added later without changi
 
 ## Important integration boundary
 
-Provider credentials are configured outside the source code. The backend includes Stripe PaymentIntent creation and signed webhook processing; Xero OAuth, token refresh and draft invoice sync; shared Google OAuth for Gmail and Calendar, Gmail send/inbox sync and Calendar event sync; WhatsApp Cloud API sending and webhook-to-CRM message sync; and DocuSign JWT authentication, consent flow, envelope sending and status checks. These additions use the existing CRM resource/model architecture and keep generic CRUD routes available.
+Provider credentials are configured outside the source code. The backend includes Stripe-hosted Checkout and PaymentIntent creation, plus signed webhook processing; Xero OAuth, token refresh and draft invoice sync; shared Google OAuth for Gmail and Calendar, Gmail send/inbox sync and Calendar event sync; WhatsApp Cloud API sending and webhook-to-CRM message sync; and DocuSign JWT authentication, consent flow, envelope sending and status checks. These additions use the existing CRM resource/model architecture and keep generic CRUD routes available.
 
 Live provider flows still require credentials, one-time OAuth/consent steps where applicable, provider-dashboard webhook/redirect registration and testing against each client's sandbox/test account. WordPress and access-control integrations are not included in the current confirmed client scope.
 
@@ -67,6 +67,25 @@ API base URL:
 ```text
 http://localhost:5000/api/v1
 ```
+
+## Test Stripe payments and webhooks locally
+
+1. Use Stripe Test-mode keys in `.env` (`STRIPE_SECRET_KEY=sk_test_...`). Ensure `CLIENT_URL=http://localhost:5173` and the React dev server is running on that URL.
+2. Start MongoDB and the backend (`npm run dev`), then start the CRM (`npm run dev` in the frontend project).
+3. Install and sign in to the Stripe CLI, then forward events into the local backend:
+
+```bash
+stripe login
+stripe listen --forward-to localhost:5000/api/v1/webhooks/stripe
+```
+
+4. Copy the `whsec_...` secret printed by `stripe listen` into backend `.env` as `STRIPE_WEBHOOK_SECRET`, then restart the backend. The CLI secret is for that local listener session; do not use it as the production Dashboard webhook secret.
+5. In Banyan CRM, open **Invoices**, click **Pay with Stripe** for an `awaiting` or `overdue` invoice, and use Stripe's test card `4242 4242 4242 4242`, any future expiry, any CVC and any postal code.
+6. Stripe Checkout redirects back to Banyan. The Invoices page polls the backend briefly; after the signed webhook arrives, the payment should show `succeeded` on Payments and the invoice should show `paid`.
+
+Use test keys and test card numbers only. A bare `stripe trigger payment_intent.succeeded` event does not represent a Banyan invoice and will be ignored if it has no matching Banyan payment metadata; test the end-to-end flow through the CRM instead.
+
+For detailed step-by-step local Stripe test setup (including Stripe CLI webhooks), see [`docs/stripe-local-testing.md`](docs/stripe-local-testing.md).
 
 ## Seed development data
 
@@ -162,7 +181,7 @@ After deployment, set `PUBLIC_API_URL` to the public HTTPS API origin without `/
 
 | Service           | Endpoints                                                                                                                                                                                                                                                |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stripe            | `POST /payments/stripe/payment-intents`; `POST /webhooks/stripe`                                                                                                                                                                                         |
+| Stripe            | `POST /payments/stripe/checkout-sessions`; `POST /payments/stripe/payment-intents`; `POST /webhooks/stripe`                                                                                                                                                                                         |
 | Xero              | `GET /integrations/xero/connect`; `GET /integrations/xero/callback`; `POST /integrations/xero/invoices/:invoiceId/sync`; `GET /integrations/xero/invoices/:invoiceId`; `GET /integrations/xero/status`                                                   |
 | Google Gmail      | `GET /integrations/google/connect`; `GET /integrations/google/callback`; `POST /integrations/google/gmail/send`; `POST /integrations/google/gmail/sync`; `GET /integrations/google/gmail/messages`; `GET /integrations/google/gmail/messages/:messageId` |
 | Google Calendar   | Same Google OAuth grant as Gmail; `GET /integrations/google/calendar/events`; `POST /integrations/google/calendar/events/:eventId/sync`                                                                                                                  |
@@ -172,3 +191,14 @@ After deployment, set `PUBLIC_API_URL` to the public HTTPS API origin without `/
 All paths are relative to `/api/v1`. Operational endpoints are authenticated except provider callback/webhook endpoints.
 
 See [`docs/provider-integration-setup.md`](docs/provider-integration-setup.md) for environment variables, setup steps, request bodies and limitations. Keys alone do not bypass initial OAuth/consent or provider dashboard webhook registration.
+
+## Gmail & Google Calendar local development
+
+The CRM's Integrations, Inbox, and Calendar pages share one Google OAuth Web application. See `docs/google-gmail-calendar-local-setup.md` for the complete Google Cloud Console and `.env` setup guide. For local development, leave `PUBLIC_API_URL` blank, configure the exact frontend origin in `CLIENT_URL`, and register `http://localhost:5000/api/v1/integrations/google/callback` as the OAuth redirect URI. OAuth tokens are encrypted before being stored.
+
+
+## Public website enquiry capture
+
+The Banyan Workspace marketing form can submit to `POST /api/v1/public/enquiries` to create/update a Contact and create website-sourced Deals in their matching CRM pipelines. Configure `PUBLIC_WEBSITE_URL`, `PUBLIC_ENQUIRY_WORKSPACE_SLUG` (or `PUBLIC_ENQUIRY_WORKSPACE_ID`), and `CORS_ALLOWED_ORIGINS` in the backend environment.
+
+See [`docs/website-enquiry-integration.md`](docs/website-enquiry-integration.md) for the form contract and deployment checklist. After deploying, run `npm run setup:website-enquiries` once against the target workspace to ensure Won/Lost stages are configured.
