@@ -12,6 +12,8 @@ const schema = new mongoose.Schema(
     dealId: { type: mongoose.Schema.Types.ObjectId, ref: "Deal" },
     membershipId: { type: mongoose.Schema.Types.ObjectId, ref: "Membership" },
     invoiceNumber: String,
+    // Bearer token for the customer-facing invoice payment page.
+    publicPaymentToken: { type: String, select: false },
     provider: { type: String, default: "xero" },
     externalId: String,
     description: String,
@@ -39,4 +41,5 @@ const schema = new mongoose.Schema(
   { timestamps: true },
 );
 schema.index({ workspaceId: 1, status: 1, dueAt: 1 });
+schema.index({ publicPaymentToken: 1 }, { unique: true, sparse: true });
 export const Invoice = mongoose.model("Invoice", schema);

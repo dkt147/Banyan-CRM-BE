@@ -41,6 +41,7 @@ import auditLogRoutes from "./routes/auditLogs.routes.js";
 import dashboardRoutes from "./routes/dashboard.routes.js";
 import webhookRoutes from "./routes/webhook.routes.js";
 import publicEnquiryRoutes from "./routes/publicEnquiries.routes.js";
+import publicInvoicePaymentRoutes from "./routes/publicInvoicePayment.routes.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -69,6 +70,7 @@ app.get("/", (_req, res) =>
 );
 app.use("/api/v1/health", healthRoutes);
 app.use("/api/v1/public/enquiries", publicEnquiryRoutes);
+app.use("/api/v1/public/invoices", publicInvoicePaymentRoutes);
 app.use("/api/v1/auth", authRoutes);
 app.use("/api/v1/workspace", workspaceRoutes);
 app.use("/api/v1/members", memberRoutes);

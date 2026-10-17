@@ -3,6 +3,7 @@ import { requireAuth } from "../middleware/auth.middleware.js";
 import { resourceRouter } from "./resource.routes.js";
 import { resourceRegistry } from "../utils/resourceRegistry.js";
 import * as c from "../controllers/invoice.controller.js";
+import { createInvoicePaymentLink } from "../controllers/publicInvoicePayment.controller.js";
 import { Invoice } from "../models/Invoice.js";
 import { Payment } from "../models/Payment.js";
 import { AppError } from "../utils/AppError.js";
@@ -12,6 +13,7 @@ const r = Router();
 r.use(requireAuth);
 
 // Specialized actions must be declared before generic /:id CRUD routes.
+r.post("/:id/payment-link", createInvoicePaymentLink);
 r.patch("/:id/pay", c.markPaid);
 r.post("/mark-overdue", c.overdue);
 
