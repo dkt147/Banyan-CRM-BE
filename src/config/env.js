@@ -8,6 +8,10 @@ for (const key of required) {
 export const env = {
   NODE_ENV: process.env.NODE_ENV || "development",
   PORT: Number(process.env.PORT || 5000),
+  GROQ_API_KEY: process.env.GROQ_API_KEY || "",
+  GROQ_MODEL: process.env.GROQ_MODEL || "openai/gpt-oss-20b",
+  GROQ_BASE_URL: process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1",
+  GROQ_TIMEOUT_MS: Number(process.env.GROQ_TIMEOUT_MS || 25000),
   DASHBOARD_DESK_CAPACITY: Number(process.env.DASHBOARD_DESK_CAPACITY || 0),
   DASHBOARD_OFFICE_CAPACITY: Number(process.env.DASHBOARD_OFFICE_CAPACITY || 0),
   MONGODB_URI: process.env.MONGODB_URI,

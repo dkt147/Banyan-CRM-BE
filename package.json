@@ -2,7 +2,7 @@
   "name": "banyan-crm-backend",
   "version": "2.0.0",
   "private": true,
-  "description": "Complete non-AI backend for Banyan Workspace CRM",
+  "description": "Banyan Workspace CRM backend with Groq-powered database-grounded assistant",
   "type": "module",
   "scripts": {
     "dev": "nodemon src/server.js",
