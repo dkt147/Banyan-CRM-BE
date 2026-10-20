@@ -3,7 +3,128 @@ import { Contact } from "../models/Contact.js";
 import { Company } from "../models/Company.js";
 import { Deal } from "../models/Deal.js";
 import { Activity } from "../models/Activity.js";
+import { Workspace } from "../models/Workspace.js";
 import { AppError } from "../utils/AppError.js";
+
+const QUIET_DEAL_DAYS = 5;
+
+function getZonedDateParts(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  return Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+}
+
+function localMidnightAsUtc(calendarDate, timeZone) {
+  const year = calendarDate.getUTCFullYear();
+  const month = calendarDate.getUTCMonth();
+  const day = calendarDate.getUTCDate();
+  const target = Date.UTC(year, month, day, 0, 0, 0);
+  let guess = target;
+
+  // Iteratively apply the timezone offset so this also handles DST transitions.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const local = getZonedDateParts(new Date(guess), timeZone);
+    const representedAsUtc = Date.UTC(
+      local.year,
+      local.month - 1,
+      local.day,
+      local.hour,
+      local.minute,
+      local.second,
+    );
+    const correction = target - representedAsUtc;
+    guess += correction;
+    if (correction === 0) break;
+  }
+  return new Date(guess);
+}
+
+function getWorkspaceDateRanges(timeZone) {
+  const now = new Date();
+  const current = getZonedDateParts(now, timeZone);
+  const todayCalendar = new Date(Date.UTC(current.year, current.month - 1, current.day));
+  const tomorrowCalendar = new Date(todayCalendar);
+  tomorrowCalendar.setUTCDate(tomorrowCalendar.getUTCDate() + 1);
+
+  // This week means the current Monday-to-Monday period, based on workspace timezone.
+  const daysSinceMonday = (todayCalendar.getUTCDay() + 6) % 7;
+  const nextMondayCalendar = new Date(todayCalendar);
+  nextMondayCalendar.setUTCDate(nextMondayCalendar.getUTCDate() + (7 - daysSinceMonday));
+
+  return {
+    now,
+    startOfToday: localMidnightAsUtc(todayCalendar, timeZone),
+    startOfTomorrow: localMidnightAsUtc(tomorrowCalendar, timeZone),
+    startOfNextWeek: localMidnightAsUtc(nextMondayCalendar, timeZone),
+  };
+}
+
+export async function getTaskSummary({ ownerId, workspaceId }) {
+  const workspace = await Workspace.findById(workspaceId).select("timezone").lean();
+  let timeZone = workspace?.timezone || "Asia/Hong_Kong";
+  try {
+    // Validate stored timezone; malformed workspace configuration should not break Tasks.
+    new Intl.DateTimeFormat("en-US", { timeZone }).format(new Date());
+  } catch {
+    timeZone = "Asia/Hong_Kong";
+  }
+
+  const { now, startOfToday, startOfTomorrow, startOfNextWeek } = getWorkspaceDateRanges(timeZone);
+  const activeTaskFilter = {
+    workspaceId,
+    status: { $nin: ["completed", "cancelled"] },
+    $and: [
+      { $or: [{ createdBy: ownerId }, { assignedTo: ownerId }] },
+      { $or: [{ status: { $ne: "snoozed" } }, { status: "snoozed", snoozedUntil: { $lte: now } }] },
+    ],
+  };
+  const overdueFilter = {
+    ...activeTaskFilter,
+    dueAt: { $lt: startOfToday },
+  };
+  const dueTodayFilter = {
+    ...activeTaskFilter,
+    dueAt: { $gte: startOfToday, $lt: startOfTomorrow },
+  };
+  const thisWeekFilter = {
+    ...activeTaskFilter,
+    dueAt: { $gte: startOfToday, $lt: startOfNextWeek },
+  };
+  const quietCutoff = new Date(now.getTime() - QUIET_DEAL_DAYS * 24 * 60 * 60 * 1000);
+
+  const [overdue, dueToday, thisWeek, dealsGoneQuiet] = await Promise.all([
+    Task.countDocuments(overdueFilter),
+    Task.countDocuments(dueTodayFilter),
+    Task.countDocuments(thisWeekFilter),
+    Deal.countDocuments({
+      workspaceId,
+      status: "open",
+      $expr: {
+        $lte: [
+          { $ifNull: ["$lastActivityAt", { $ifNull: ["$updatedAt", "$createdAt"] }] },
+          quietCutoff,
+        ],
+      },
+    }),
+  ]);
+
+  return {
+    overdue,
+    dueToday,
+    thisWeek,
+    dealsGoneQuiet,
+    quietDealThresholdDays: QUIET_DEAL_DAYS,
+    timezone: timeZone,
+  };
+}
 
 async function validateRelations(data, ownerId) {
   if (data.contactId) {
@@ -69,6 +190,7 @@ export async function createTask(data, ownerId, workspaceId) {
 
 export async function getTasks({
   ownerId,
+  workspaceId,
   page = 1,
   limit = 20,
   status,
@@ -82,7 +204,7 @@ export async function getTasks({
 }) {
   const skip = (page - 1) * limit;
 
-  const filter = {};
+  const filter = { workspaceId };
 
   /*
    * A user can see:

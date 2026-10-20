@@ -8,6 +8,7 @@ import {
   confirm,
   cancel,
   events,
+  week,
 } from "../controllers/calendar.controller.js";
 
 const r = Router();
@@ -17,6 +18,7 @@ r.use(requireAuth);
 // /:id CRUD route so they cannot be captured as resource IDs.
 r.get("/availability", availability);
 r.get("/events", events);
+r.get("/week", week);
 r.post("/hold", hold);
 r.patch("/:id/confirm", confirm);
 r.patch("/:id/cancel", cancel);

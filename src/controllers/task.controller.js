@@ -7,6 +7,7 @@ import {
   completeTask,
   snoozeTask,
   deleteTask,
+  getTaskSummary,
 } from "../services/task.service.js";
 
 import {
@@ -35,6 +36,23 @@ export const createTaskController = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Get task dashboard summary
+ * GET /tasks/summary
+ */
+export const getTaskSummaryController = asyncHandler(async (req, res) => {
+  const summary = await getTaskSummary({
+    ownerId: req.user.id,
+    workspaceId: req.workspaceId,
+  });
+
+  return res.status(200).json({
+    success: true,
+    message: "Task summary fetched successfully.",
+    data: summary,
+  });
+});
+
+/**
  * Get Tasks
  * GET /tasks
  */
@@ -44,6 +62,7 @@ export const getTasksController = asyncHandler(async (req, res) => {
   const result = await getTasks({
     ...query,
     ownerId: req.user.id,
+    workspaceId: req.workspaceId,
   });
 
   return res.status(200).json({

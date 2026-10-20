@@ -202,3 +202,8 @@ The CRM's Integrations, Inbox, and Calendar pages share one Google OAuth Web app
 The Banyan Workspace marketing form can submit to `POST /api/v1/public/enquiries` to create/update a Contact and create website-sourced Deals in their matching CRM pipelines. Configure `PUBLIC_WEBSITE_URL`, `PUBLIC_ENQUIRY_WORKSPACE_SLUG` (or `PUBLIC_ENQUIRY_WORKSPACE_ID`), and `CORS_ALLOWED_ORIGINS` in the backend environment.
 
 See [`docs/website-enquiry-integration.md`](docs/website-enquiry-integration.md) for the form contract and deployment checklist. After deploying, run `npm run setup:website-enquiries` once against the target workspace to ensure Won/Lost stages are configured.
+
+
+### Dashboard demonstration data
+
+See [`docs/dashboard-complete-endpoint.md`](docs/dashboard-complete-endpoint.md) for the authenticated dashboard endpoint, optional occupancy capacity settings, and the idempotent `npm run seed:dashboard-demo` command.

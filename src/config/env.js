@@ -8,6 +8,8 @@ for (const key of required) {
 export const env = {
   NODE_ENV: process.env.NODE_ENV || "development",
   PORT: Number(process.env.PORT || 5000),
+  DASHBOARD_DESK_CAPACITY: Number(process.env.DASHBOARD_DESK_CAPACITY || 0),
+  DASHBOARD_OFFICE_CAPACITY: Number(process.env.DASHBOARD_OFFICE_CAPACITY || 0),
   MONGODB_URI: process.env.MONGODB_URI,
   CLIENT_URL: process.env.CLIENT_URL || "http://localhost:5173",
   PUBLIC_WEBSITE_URL: process.env.PUBLIC_WEBSITE_URL || "https://banyanworkspace.com",

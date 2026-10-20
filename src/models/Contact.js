@@ -29,6 +29,8 @@ const schema = new mongoose.Schema(
     },
     notes: String,
     isArchived: { type: Boolean, default: false, index: true },
+    // Monthly meeting-room allowance in hours (0 = no credit tracking).
+    meetingRoomCreditHours: { type: Number, default: 0, min: 0 },
     metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true, toJSON: { virtuals: true } },

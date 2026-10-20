@@ -10,6 +10,7 @@ import {
   completeTaskController,
   snoozeTaskController,
   deleteTaskController,
+  getTaskSummaryController,
 } from "../controllers/task.controller.js";
 
 const router = Router();
@@ -19,6 +20,7 @@ router.use(requireAuth);
 router.post("/", createTaskController);
 
 router.get("/", getTasksController);
+router.get("/summary", getTaskSummaryController);
 
 router.get("/:taskId", getTaskController);
 
