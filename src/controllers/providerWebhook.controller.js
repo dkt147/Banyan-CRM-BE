@@ -1,3 +1,4 @@
+import { Deal } from "../models/Deal.js";
 import crypto from "node:crypto";
 import mongoose from "mongoose";
 import { env } from "../config/env.js";
@@ -145,6 +146,9 @@ async function processStripeEvent(event, eventRecord) {
       { $set: { status: "paid", paidAt: payment.paidAt } },
       { new: false },
     );
+    if (invoice?.dealId) {
+      await Deal.updateOne({ _id: invoice.dealId, workspaceId: payment.workspaceId }, { $set: { status: "won", "metadata.paymentReceivedConfirmed": true, "metadata.paymentConfirmationSource": "stripe", "metadata.paymentConfirmedAt": payment.paidAt } });
+    }
     if (invoice && !wasPaid && invoice.contactId) {
       try {
         await earnFromPayment(

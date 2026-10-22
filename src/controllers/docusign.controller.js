@@ -1,3 +1,8 @@
+import { Deal } from "../models/Deal.js";
+import { Pipeline } from "../models/Pipeline.js";
+import { PipelineStage } from "../models/PipelineStage.js";
+import { Task } from "../models/Task.js";
+import { Notification } from "../models/Notification.js";
 import jwt from "jsonwebtoken";
 import { Agreement } from "../models/Agreement.js";
 import { AppError } from "../utils/AppError.js";
@@ -114,6 +119,20 @@ export const sendDocuSignAgreement = asyncHandler(async (req, res) => {
     docusignSentAt: new Date(),
   };
   await agreement.save();
+  if (agreement.dealId) {
+    const deal = await Deal.findOne({ _id: agreement.dealId, workspaceId: req.workspaceId }).populate("pipelineId");
+    if (deal) {
+      const targetKey = deal.pipelineId?.key === "virtual-office" ? "invoice-sent" : "agreement-sent";
+      const stage = await PipelineStage.findOne({ workspaceId: req.workspaceId, pipelineId: deal.pipelineId?._id || deal.pipelineId, key: targetKey, isActive: true });
+      if (stage) {
+        deal.stageId = stage._id; deal.stageChangedAt = new Date(); deal.lastActivityAt = new Date(); await deal.save();
+        const title = `Follow up: ${deal.title} — ${stage.name}`.slice(0, 200);
+        const exists = await Task.exists({ workspaceId: req.workspaceId, dealId: deal._id, title, status: { $nin: ["completed", "cancelled"] } });
+        if (!exists) await Task.create({ workspaceId: req.workspaceId, title, description: `Agreement and invoice sent. Follow up on signature and payment process.`, contactId: deal.contactId, companyId: deal.companyId, dealId: deal._id, assignedTo: deal.ownerId || req.user._id, createdBy: req.user._id, dueAt: new Date(Date.now() + 86400000), priority: "high", source: "automation", metadata: { trigger: "docusign_agreement_sent", stageId: String(stage._id) } });
+        await Notification.create({ workspaceId: req.workspaceId, userId: deal.ownerId || req.user._id, type: "deal_stage_changed", title: `Deal moved to ${stage.name}`, body: `${deal.title} moved to ${stage.name} after the agreement was sent.`, entityType: "deal", entityId: deal._id, channel: "in_app" });
+      }
+    }
+  }
   res.status(201).json({
     success: true,
     data: {
@@ -172,6 +191,20 @@ export const getDocuSignAgreementStatus = asyncHandler(async (req, res) => {
     docusignLastCheckedAt: new Date(),
   };
   await agreement.save();
+  if (agreement.status === "signed" && agreement.dealId) {
+    const deal = await Deal.findOne({ _id: agreement.dealId, workspaceId: req.workspaceId });
+    if (deal) {
+      const pipeline = await Pipeline.findOne({ _id: deal.pipelineId, workspaceId: req.workspaceId }).select("key").lean();
+      const target = await PipelineStage.findOne({ workspaceId: req.workspaceId, pipelineId: deal.pipelineId, isActive: true, key: pipeline?.key === "virtual-office" ? "active" : { $in: ["agreement-signed", "agreement-sent"] } }).sort({ sortOrder: 1 });
+      if (target && String(deal.stageId) !== String(target._id)) {
+        deal.stageId = target._id; deal.stageChangedAt = new Date(); deal.lastActivityAt = new Date(); await deal.save();
+        const title = `Follow up: ${deal.title} — Agreement Signed`.slice(0, 200);
+        const exists = await Task.exists({ workspaceId: req.workspaceId, dealId: deal._id, title, status: { $nin: ["completed", "cancelled"] } });
+        if (!exists) await Task.create({ workspaceId: req.workspaceId, title, description: "Agreement signed. Review invoice and next steps.", contactId: deal.contactId, companyId: deal.companyId, dealId: deal._id, assignedTo: deal.ownerId || req.user._id, createdBy: req.user._id, dueAt: new Date(), priority: "high", source: "automation", metadata: { trigger: "docusign_agreement_signed" } });
+        await Notification.create({ workspaceId: req.workspaceId, userId: deal.ownerId || req.user._id, type: "agreement_signed", title: "Agreement signed", body: `${deal.title}: agreement signed in DocuSign.`, entityType: "deal", entityId: deal._id, channel: "in_app" });
+      }
+    }
+  }
   res.json({
     success: true,
     data: {

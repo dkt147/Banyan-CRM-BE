@@ -4,6 +4,11 @@ import { CalendarEvent } from "../models/CalendarEvent.js";
 import { Company } from "../models/Company.js";
 import { Contact } from "../models/Contact.js";
 import { AppError } from "../utils/AppError.js";
+import { Deal } from "../models/Deal.js";
+import { PipelineStage } from "../models/PipelineStage.js";
+import { Task } from "../models/Task.js";
+import { Notification } from "../models/Notification.js";
+import { Invoice } from "../models/Invoice.js";
 
 const ACTIVE_BOOKING_STATUSES = ["held", "pending", "confirmed"];
 const VENUE_TYPES = ["studio", "venue", "photoshoot", "podcast"];
@@ -86,6 +91,32 @@ export const confirm = asyncHandler(async (req, res) => {
       404,
       "NOT_FOUND",
     );
+  // Website-originated Self-Serve bookings create a local no-tax invoice draft automatically.
+  // Xero sync is intentionally separate until the client provides item/account-code rules.
+  if (b.source === "website" && Number(b.price || 0) > 0 && b.contactId) {
+    const alreadyInvoiced = await Invoice.exists({ workspaceId: req.workspaceId, "metadata.bookingId": String(b._id) });
+    if (!alreadyInvoiced) await Invoice.create({ workspaceId: req.workspaceId, contactId: b.contactId, companyId: b.companyId, dealId: b.dealId, description: `${b.title || b.bookingType || "Self-Serve booking"} — ${b.resourceName || "Banyan Workspace"}`, subtotal: Number(b.price), tax: 0, total: Number(b.price), currency: b.currency || "HKD", status: "draft", source: "self_serve_booking", createdBy: req.user._id, metadata: { bookingId: String(b._id), invoiceType: "self_serve", xeroSyncPending: true } });
+  }
+
+  if (b.dealId) {
+    const deal = await Deal.findOne({ _id: b.dealId, workspaceId: req.workspaceId });
+    if (deal) {
+      const pipeline = await (await import("../models/Pipeline.js")).Pipeline.findOne({ _id: deal.pipelineId, workspaceId: req.workspaceId }).select("key").lean();
+      const type = String(b.bookingType || "").toLowerCase();
+      const keys = type === "viewing" ? ["viewing-scheduled", "viewing"] : type === "trial" ? ["trial-day-booked", "trial-booked"] : pipeline?.key === "transactional" ? ["confirmed"] : [];
+      if (!keys.length) { /* No approved automatic stage exists for this booking type. */ }
+      else {
+      const stage = await PipelineStage.findOne({ workspaceId: req.workspaceId, pipelineId: deal.pipelineId, key: { $in: keys }, isActive: true }).sort({ sortOrder: 1 });
+      if (stage) {
+        deal.stageId = stage._id; deal.stageChangedAt = new Date(); deal.lastActivityAt = new Date(); await deal.save();
+        const title = `Prepare for ${b.bookingType}: ${deal.title}`.slice(0, 200);
+        const exists = await Task.exists({ workspaceId: req.workspaceId, dealId: deal._id, title, status: { $nin: ["completed", "cancelled"] } });
+        if (!exists) await Task.create({ workspaceId: req.workspaceId, title, description: `${b.bookingType} booked for ${new Date(b.startAt).toLocaleString("en-GB", { timeZone: "Asia/Hong_Kong" })}.`, contactId: deal.contactId, companyId: deal.companyId, dealId: deal._id, assignedTo: deal.ownerId || req.user._id, createdBy: req.user._id, dueAt: new Date(b.startAt), priority: "high", source: "automation", metadata: { trigger: "booking_confirmed", bookingId: String(b._id) } });
+        await Notification.create({ workspaceId: req.workspaceId, userId: deal.ownerId || req.user._id, type: "deal_stage_changed", title: `${b.bookingType} booked`, body: `${deal.title} stage updated to ${stage.name}.`, entityType: "deal", entityId: deal._id, channel: "in_app" });
+      }
+      }
+    }
+  }
   res.json({ success: true, data: b });
 });
 export const cancel = asyncHandler(async (req, res) => {

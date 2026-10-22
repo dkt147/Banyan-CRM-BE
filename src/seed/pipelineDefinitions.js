@@ -44,6 +44,7 @@ export const pipelineDefinitions = [
     stages: [
       "Enquiry",
       "Availability Confirmed",
+      "Viewing",
       "Quote Sent",
       "Agreement Signed",
       "Deposit Invoice Sent",
@@ -52,9 +53,22 @@ export const pipelineDefinitions = [
     ],
   },
   {
+    key: "virtual-office",
+    name: "Virtual Office Pipeline",
+    sortOrder: 3,
+    stages: [
+      "Enquiry",
+      "Documents Compliance",
+      "Agreement Sent",
+      "Agreement Signed",
+      "Invoice Sent",
+      "Active",
+    ],
+  },
+  {
     key: "transactional",
     name: "Transactional / Self-Serve",
-    sortOrder: 3,
+    sortOrder: 4,
     stages: ["Booking Received", "Confirmed", "Completed"],
   },
 ];

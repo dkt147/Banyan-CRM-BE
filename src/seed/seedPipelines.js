@@ -82,7 +82,7 @@ try {
             key,
             sortOrder: index,
             isActive: true,
-            isClosedWon: isFinalStage,
+            isClosedWon: false,
             isClosedLost: false,
             probability: isFinalStage ? 100 : 0,
           },

@@ -3,6 +3,7 @@ import { Invoice } from "../models/Invoice.js";
 import { Payment } from "../models/Payment.js";
 import { AppError } from "../utils/AppError.js";
 import { earnFromPayment } from "../services/loyalty.service.js";
+import { Deal } from "../models/Deal.js";
 export const markPaid = asyncHandler(async (req, res) => {
   const inv = await Invoice.findOne({
     _id: req.params.id,
@@ -38,6 +39,7 @@ export const markPaid = asyncHandler(async (req, res) => {
   inv.status = "paid";
   inv.paidAt = new Date();
   await inv.save();
+  if (inv.dealId) await Deal.updateOne({ _id: inv.dealId, workspaceId: req.workspaceId }, { $set: { status: "won", "metadata.paymentReceivedConfirmed": true, "metadata.paymentConfirmationSource": "manual", "metadata.paymentConfirmedAt": inv.paidAt } });
   const loyalty = await earnFromPayment(
     req.workspaceId,
     req.user._id,

@@ -10,14 +10,16 @@ import { env } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
 
 const SERVICE_ROUTING = {
-  "virtual office": { label: "Virtual Office", pipelineKey: "membership", productType: "virtual_office" },
-  "flexible day pass": { label: "Flexible Day Pass", pipelineKey: "membership", productType: "day_pass" },
+  "virtual office": { label: "Virtual Office", pipelineKey: "virtual-office", productType: "virtual_office" },
+  "flexible day pass": { label: "Flexible Day Pass", pipelineKey: "transactional", productType: "day_pass" },
+  "day pass package": { label: "Day Pass Packages", pipelineKey: "transactional", productType: "day_pass_package" },
+  "day pass packages": { label: "Day Pass Packages", pipelineKey: "transactional", productType: "day_pass_package" },
   "coworking desk": { label: "Coworking Desks", pipelineKey: "membership", productType: "membership" },
   "coworking desks": { label: "Coworking Desks", pipelineKey: "membership", productType: "membership" },
   "serviced office": { label: "Serviced Offices", pipelineKey: "private-office", productType: "private_office" },
   "serviced offices": { label: "Serviced Offices", pipelineKey: "private-office", productType: "private_office" },
-  "meeting room": { label: "Meeting Rooms", pipelineKey: "venue-hire", productType: "meeting_room" },
-  "meeting rooms": { label: "Meeting Rooms", pipelineKey: "venue-hire", productType: "meeting_room" },
+  "meeting room": { label: "Meeting Rooms", pipelineKey: "transactional", productType: "meeting_room" },
+  "meeting rooms": { label: "Meeting Rooms", pipelineKey: "transactional", productType: "meeting_room" },
   "event venue": { label: "Event Venue", pipelineKey: "venue-hire", productType: "venue_hire" },
   "event space": { label: "Event Venue", pipelineKey: "venue-hire", productType: "venue_hire" },
   "photoshoot space": { label: "Photoshoot Space", pipelineKey: "venue-hire", productType: "venue_hire" },
@@ -25,11 +27,28 @@ const SERVICE_ROUTING = {
   "podcast studio": { label: "Podcast Studio", pipelineKey: "venue-hire", productType: "studio" },
 };
 
+
+function endOfDayInTimeZone(date, timeZone = "Asia/Hong_Kong") {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date).filter(p => p.type !== "literal").map(p => [p.type, Number(p.value)]));
+  const target = Date.UTC(parts.year, parts.month - 1, parts.day, 23, 59, 59, 999);
+  let guess = target;
+  for (let i = 0; i < 4; i++) {
+    const local = new Intl.DateTimeFormat("en-US", { timeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).formatToParts(new Date(guess));
+    const p = Object.fromEntries(local.filter(x => x.type !== "literal").map(x => [x.type, Number(x.value)]));
+    const represented = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second, 999);
+    const correction = target - represented; guess += correction; if (!correction) break;
+  }
+  return new Date(guess);
+}
+
 function normalizeKey(value) {
   return String(value || "").toLowerCase().trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
 }
 
 function resolveServices(input) {
+  if (Array.isArray(input) && input.length > 1) {
+    throw new AppError("Please select only one service per website enquiry. The team can add other deals manually in CRM.", 400, "MULTIPLE_ENQUIRY_SERVICES_NOT_ALLOWED");
+  }
   const services = [];
   const seen = new Set();
   for (const raw of input) {
@@ -240,12 +259,12 @@ export async function createPublicEnquiry(payload) {
     followUpTask = await Task.create({
       workspaceId: workspace._id,
       title: `Follow up: website enquiry — ${fullName}`.slice(0, 200),
-      description: `Contact ${fullName} (${email}) within 24 hours. Interested in: ${services.map((service) => service.label).join(", ")}.${payload.notes ? ` Notes: ${payload.notes}` : ""}`.slice(0, 5000),
+      description: `Contact ${fullName} (${email}) before the end of today. Interested in: ${services.map((service) => service.label).join(", ")}.${payload.notes ? ` Notes: ${payload.notes}` : ""}`.slice(0, 5000),
       contactId: contact._id,
       dealId: deals[0]?._id,
       assignedTo: leadOwnerId,
       createdBy: leadOwnerId,
-      dueAt: new Date(receivedAt.getTime() + 24 * 60 * 60 * 1000),
+      dueAt: endOfDayInTimeZone(receivedAt, workspace.timezone || "Asia/Hong_Kong"),
       priority: "high",
       status: "pending",
       source: "system",

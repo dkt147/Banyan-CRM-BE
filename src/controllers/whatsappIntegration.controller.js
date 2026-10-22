@@ -12,6 +12,8 @@ import { Conversation } from "../models/Conversation.js";
 import { Integration } from "../models/Integration.js";
 import { Message } from "../models/Message.js";
 import { WebhookEvent } from "../models/WebhookEvent.js";
+import { User } from "../models/User.js";
+import { Task } from "../models/Task.js";
 
 function digits(value) {
   return String(value || "").replace(/\D/g, "");
@@ -283,13 +285,26 @@ export const receiveWhatsAppWebhookAndSync = asyncHandler(async (req, res) => {
             continue;
           }
 
-          const actualContact =
+          let actualContact =
             contact && String(contact.workspaceId) === String(workspaceId)
               ? contact
               : null;
           const profileName =
             value.contacts?.find((item) => digits(item?.wa_id) === from)
               ?.profile?.name || from;
+          let workspaceOwner = null;
+          if (!actualContact) {
+            workspaceOwner = await User.findOne({ workspaceId, isActive: true, role: "admin" }).sort({ createdAt: 1 });
+            if (!workspaceOwner) workspaceOwner = await User.findOne({ workspaceId, isActive: true }).sort({ createdAt: 1 });
+            if (workspaceOwner) {
+              actualContact = await Contact.findOneAndUpdate(
+                { workspaceId, whatsapp: { $in: [from, `+${from}`] } },
+                { $setOnInsert: { workspaceId, ownerId: workspaceOwner._id, firstName: String(profileName).slice(0, 100) || "WhatsApp Lead", lastName: "", phone: `+${from}`, whatsapp: `+${from}`, source: "whatsapp", tags: ["whatsapp_lead"], notes: "Contact created automatically from an inbound WhatsApp message." } },
+                { new: true, upsert: true, setDefaultsOnInsert: true },
+              );
+            }
+          }
+          const priorConversation = await Conversation.findOne({ workspaceId, channel: "whatsapp", externalThreadId: from }).select("_id").lean();
           const conversation = await Conversation.findOneAndUpdate(
             { workspaceId, channel: "whatsapp", externalThreadId: from },
             {
@@ -332,6 +347,14 @@ export const receiveWhatsAppWebhookAndSync = asyncHandler(async (req, res) => {
               ? new Date(Number(incoming.timestamp) * 1000)
               : new Date(),
           });
+          if (!priorConversation) {
+            const assignee = workspaceOwner || await User.findOne({ workspaceId, isActive: true, role: "admin" }).sort({ createdAt: 1 });
+            if (assignee) {
+              const today = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date()).filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+              const dueAt = new Date(Date.UTC(today.year, today.month - 1, today.day, 15, 59, 59, 999));
+              await Task.create({ workspaceId, title: `Respond to new WhatsApp enquiry — ${String(profileName).slice(0, 100)}`.slice(0, 200), description: `Reply to the new WhatsApp enquiry from +${from} today. Review the conversation and create a deal once the requested service is clear.`, contactId: actualContact?._id, assignedTo: assignee._id, createdBy: assignee._id, dueAt, priority: "high", source: "system", metadata: { trigger: "new_whatsapp_conversation", conversationId: String(conversation._id) } });
+            }
+          }
         }
       }
     }

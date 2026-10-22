@@ -207,3 +207,8 @@ See [`docs/website-enquiry-integration.md`](docs/website-enquiry-integration.md)
 ### Dashboard demonstration data
 
 See [`docs/dashboard-complete-endpoint.md`](docs/dashboard-complete-endpoint.md) for the authenticated dashboard endpoint, optional occupancy capacity settings, and the idempotent `npm run seed:dashboard-demo` command.
+
+
+## Banyan Assist (Ask Anything)
+
+The authenticated `POST /api/v1/assistant/chat` endpoint uses Groq and workspace-scoped, read-only MongoDB retrieval to answer questions about CRM records. Configure `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_BASE_URL`, and `GROQ_TIMEOUT_MS` in the backend environment. The API key must never be placed in frontend `VITE_*` variables. See [docs/ask-anything-groq.md](docs/ask-anything-groq.md) for flow, response contract, security handling, and test steps.

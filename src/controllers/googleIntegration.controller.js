@@ -1,3 +1,8 @@
+import { User } from "../models/User.js";
+import { Deal } from "../models/Deal.js";
+import { PipelineStage } from "../models/PipelineStage.js";
+import { Task } from "../models/Task.js";
+import { Notification } from "../models/Notification.js";
 import { CalendarEvent } from "../models/CalendarEvent.js";
 import { Contact } from "../models/Contact.js";
 import { Conversation } from "../models/Conversation.js";
@@ -176,6 +181,26 @@ export const sendGmailMessage = asyncHandler(async (req, res) => {
     },
   });
 
+  // If a message is explicitly associated with a deal, sending a quote advances it and schedules the agreed 3-day follow-up.
+  if (req.body?.dealId) {
+    const deal = await Deal.findOne({ _id: req.body.dealId, workspaceId: req.workspaceId });
+    if (deal) {
+      const isQuote = /\bquote|quotation|proposal\b/i.test(subjectText);
+      const targetKey = isQuote ? "quote-sent" : null;
+      if (targetKey) {
+        const stage = await PipelineStage.findOne({ workspaceId: req.workspaceId, pipelineId: deal.pipelineId, key: targetKey, isActive: true });
+        if (stage) {
+          deal.stageId = stage._id; deal.stageChangedAt = sentAt; deal.lastActivityAt = sentAt; await deal.save();
+          const followTitle = `Quote follow-up: ${deal.title}`.slice(0, 200);
+          const delayDays = 3;
+          const existingTask = await Task.exists({ workspaceId: req.workspaceId, dealId: deal._id, title: followTitle, status: { $nin: ["completed", "cancelled"] } });
+          if (!existingTask) await Task.create({ workspaceId: req.workspaceId, title: followTitle, description: "Follow up in 3 days if the customer has not responded to the quote.", contactId: deal.contactId, companyId: deal.companyId, dealId: deal._id, assignedTo: deal.ownerId || req.user._id, createdBy: req.user._id, dueAt: new Date(sentAt.getTime() + delayDays * 86400000), priority: "high", source: "automation", metadata: { trigger: targetKey, emailMessageId: result.id } });
+          await Notification.create({ workspaceId: req.workspaceId, userId: deal.ownerId || req.user._id, type: "deal_stage_changed", title: `Deal moved to ${stage.name}`, body: `${deal.title} moved to ${stage.name} after an email was sent.`, entityType: "deal", entityId: deal._id, channel: "in_app" });
+        }
+      }
+    }
+  }
+
   await Integration.updateOne(
     { workspaceId: req.workspaceId, provider: "gmail" },
     { $set: { lastSyncedAt: sentAt } },
@@ -326,12 +351,20 @@ export const syncGmailInbox = asyncHandler(async (req, res) => {
       const sentAt = message.internalDate
         ? new Date(Number(message.internalDate))
         : new Date();
-      const contact = participantEmail
-        ? await Contact.findOne({
-            workspaceId: req.workspaceId,
-            email: participantEmail,
-          })
+      let contact = participantEmail
+        ? await Contact.findOne({ workspaceId: req.workspaceId, email: participantEmail })
         : null;
+      let inboxOwner = null;
+      if (direction === "inbound" && participantEmail && !contact) {
+        inboxOwner = await User.findOne({ workspaceId: req.workspaceId, role: "admin", isActive: true }).sort({ createdAt: 1 });
+        if (!inboxOwner) inboxOwner = await User.findOne({ workspaceId: req.workspaceId, isActive: true }).sort({ createdAt: 1 });
+        if (inboxOwner) contact = await Contact.findOneAndUpdate(
+          { workspaceId: req.workspaceId, email: participantEmail },
+          { $setOnInsert: { workspaceId: req.workspaceId, ownerId: inboxOwner._id, firstName: String(participantName || participantEmail).slice(0, 100), lastName: "", email: participantEmail, source: "email", tags: ["email_lead"], notes: "Contact created automatically from an inbound email." } },
+          { new: true, upsert: true, setDefaultsOnInsert: true },
+        );
+      }
+      const priorConversation = await Conversation.findOne({ workspaceId: req.workspaceId, channel: "email", externalThreadId: message.threadId || message.id }).select("_id").lean();
       const conversation = await Conversation.findOneAndUpdate(
         {
           workspaceId: req.workspaceId,
@@ -374,6 +407,14 @@ export const syncGmailInbox = asyncHandler(async (req, res) => {
           to: toHeader,
         },
       });
+      if (direction === "inbound" && !priorConversation) {
+        const assignee = inboxOwner || await User.findOne({ workspaceId: req.workspaceId, role: "admin", isActive: true }).sort({ createdAt: 1 });
+        if (assignee) {
+          const hk = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date()).filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+          const dueAt = new Date(Date.UTC(hk.year, hk.month - 1, hk.day, 15, 59, 59, 999));
+          await Task.create({ workspaceId: req.workspaceId, title: `Respond to new email enquiry — ${String(participantName || participantEmail).slice(0, 100)}`.slice(0, 200), description: `Review the new inbound email: ${subject}. Reply today and create a deal once the requested service is clear.`, contactId: contact?._id, assignedTo: assignee._id, createdBy: assignee._id, dueAt, priority: "high", source: "system", metadata: { trigger: "new_inbound_email", conversationId: String(conversation._id) } });
+        }
+      }
       synced += 1;
     }
   }
