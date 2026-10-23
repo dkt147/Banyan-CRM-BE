@@ -13,9 +13,17 @@ const schema = new mongoose.Schema(
       required: true,
       index: true,
     },
-    triggeredBy: String,
+    trigger: String,
+    // manual = "Run now"; trigger = deal event; schedule = time-based check
+    triggeredBy: {
+      type: String,
+      enum: ["manual", "trigger", "schedule"],
+      default: "manual",
+    },
     entityType: String,
     entityId: mongoose.Schema.Types.ObjectId,
+    // Set for time-based runs so the same episode never fires twice for one rule and deal.
+    dedupeKey: String,
     status: {
       type: String,
       enum: ["queued", "running", "completed", "failed", "skipped"],
@@ -29,6 +37,7 @@ const schema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+schema.index({ ruleId: 1, dedupeKey: 1 }, { unique: true, sparse: true });
 export const AutomationExecution = mongoose.model(
   "AutomationExecution",
   schema,

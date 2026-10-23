@@ -6,8 +6,9 @@ import { Pipeline } from "../models/Pipeline.js";
 import { PipelineStage } from "../models/PipelineStage.js";
 import { LoyaltyTier } from "../models/LoyaltyTier.js";
 import { Template } from "../models/Template.js";
+import { env } from "../config/env.js"; 
 await connectDatabase();
-let user = await User.findOne({ email: "admin@banyan.local" });
+let user = await User.findOne({ email: env.SEED_ADMIN_EMAIL });
 let workspace = user ? await Workspace.findById(user.workspaceId) : null;
 if (!workspace) {
   workspace = new Workspace({
@@ -23,8 +24,8 @@ if (!workspace) {
   user = await User.create({
     workspaceId: workspace._id,
     name: "Banyan Admin",
-    email: "admin@banyan.local",
-    passwordHash: await bcrypt.hash("ChangeMe123!", 12),
+    email: env.SEED_ADMIN_EMAIL,
+    passwordHash: await bcrypt.hash(env.SEED_ADMIN_PASSWORD, 12),
     role: "admin",
   });
 
@@ -148,5 +149,5 @@ for (let i = 0; i < tiers.length; i++) {
     { upsert: true },
   );
 }
-console.log(`Seed complete. Admin: admin@banyan.local / ChangeMe123!`);
+console.log(`Seed complete. Admin: ${env.SEED_ADMIN_EMAIL} / ${env.SEED_ADMIN_PASSWORD}`);
 process.exit(0);

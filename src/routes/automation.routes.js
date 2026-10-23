@@ -1,10 +1,13 @@
 import { Router } from "express";
 import { requireAuth } from "../middleware/auth.middleware.js";
+import { validate } from "../middleware/validate.middleware.js";
+import { automationRuleSchema } from "../validators/automation.validators.js";
 import * as c from "../controllers/automation.controller.js";
 const r = Router();
 r.use(requireAuth);
+r.get("/catalog", c.catalog);
 r.get("/", c.list);
-r.post("/", c.create);
+r.post("/", validate(automationRuleSchema), c.create);
 r.patch("/:id", c.update);
 r.post("/:id/execute", c.execute);
 r.get("/:id/executions", c.executions);

@@ -6,6 +6,7 @@ import { Company } from "../models/Company.js";
 import { Activity } from "../models/Activity.js";
 import { Task } from "../models/Task.js";
 import { AppError } from "../utils/AppError.js";
+import { fireDealTrigger } from "./automation.service.js";
 export async function listDeals(workspaceId, q = {}) {
   const page = Math.max(+q.page || 1, 1),
     limit = Math.min(Math.max(+q.limit || 25, 1), 100),
@@ -78,7 +79,7 @@ export async function createDeal(workspaceId, userId, payload) {
     ownerId: payload.ownerId || userId,
     stageChangedAt: new Date(),
   });
-  await runConfiguredRules(workspaceId, userId, "deal_created", d, { contactId: d.contactId, companyId: d.companyId, dealId: d._id });
+  await fireDealTrigger(workspaceId, userId, "deal_created", d).catch((error) => console.error("[configured-automation]", error.message));
   await Activity.create({
     workspaceId,
     userId,
@@ -134,6 +135,7 @@ export async function updateDeal(workspaceId, userId, id, payload) {
     throw new AppError("Confirm that payment has been received before marking this deal Won.", 400, "PAYMENT_CONFIRMATION_REQUIRED");
   }
   delete patch.paymentReceivedConfirmed;
+  const previousStatus = d.status;
   Object.assign(d, patch);
   if (d.status === "won" && d.metadata) d.metadata.paymentReceivedConfirmed = true;
   await d.save();
@@ -144,9 +146,12 @@ export async function updateDeal(workspaceId, userId, id, payload) {
   });
   if (newStage && stageChanged) {
     await runStageFollowUpAutomation(d, userId, newStage, workspaceId).catch((error) => console.error("[deal-automation]", error.message));
-    await runConfiguredRules(workspaceId, userId, "deal_stage_changed", d, { contactId: d.contactId, companyId: d.companyId, dealId: d._id, stageId: d.stageId }).catch((error) => console.error("[configured-automation]", error.message));
+    await fireDealTrigger(workspaceId, userId, "deal_stage_changed", d).catch((error) => console.error("[configured-automation]", error.message));
   }
-  await runConfiguredRules(workspaceId, userId, "deal_updated", d, { contactId: d.contactId, companyId: d.companyId, dealId: d._id }).catch((error) => console.error("[configured-automation]", error.message));
+  if (previousStatus !== d.status) {
+    await fireDealTrigger(workspaceId, userId, "deal_status_changed", d).catch((error) => console.error("[configured-automation]", error.message));
+  }
+  await fireDealTrigger(workspaceId, userId, "deal_updated", d).catch((error) => console.error("[configured-automation]", error.message));
   return getDeal(workspaceId, id);
 }
 
@@ -179,27 +184,3 @@ export async function deleteDeal(workspaceId, id) {
 }
 
 
-async function runConfiguredRules(workspaceId, userId, trigger, deal, context = {}) {
-  const { AutomationRule } = await import("../models/AutomationRule.js");
-  const { executeRule } = await import("./automation.service.js");
-  const rules = await AutomationRule.find({ workspaceId, trigger, isEnabled: true }).select("_id conditions").lean();
-  for (const rule of rules) {
-    // Only execute rules whose configured conditions match the current deal.
-    const matches = (rule.conditions || []).every((condition) => {
-      const actual = String(condition.field ? condition.field.split(".").reduce((v, k) => v?.[k], deal) ?? context[condition.field] ?? "" : "");
-      const expected = String(condition.value ?? "");
-      switch (condition.operator) {
-        case "equals": return actual.toLowerCase() === expected.toLowerCase();
-        case "not_equals": return actual.toLowerCase() !== expected.toLowerCase();
-        case "contains": return actual.toLowerCase().includes(expected.toLowerCase());
-        case "not_contains": return !actual.toLowerCase().includes(expected.toLowerCase());
-        case "exists": return actual !== "" && actual !== "undefined";
-        case "not_exists": return actual === "" || actual === "undefined";
-        case "greater_than": return Number(actual) > Number(expected);
-        case "less_than": return Number(actual) < Number(expected);
-        default: return false;
-      }
-    });
-    if (matches) await executeRule(workspaceId, userId, rule._id, "deal", deal._id, context);
-  }
-}
