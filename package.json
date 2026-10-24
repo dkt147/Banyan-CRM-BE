@@ -12,7 +12,8 @@
     "setup:website-enquiries": "node src/scripts/setupWebsiteEnquiryPipelines.js",
     "seed:pipelines": "node src/seed/seedPipelines.js",
     "seed:dashboard-demo": "node src/seed/seedDashboardDemoDeals.js",
-    "seed:availability": "node src/seed/seedAvailabilityDemo.js"
+    "seed:availability": "node src/seed/seedAvailabilityDemo.js",
+    "test:assistant-search": "node --test tests/assistant-search-utils.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
