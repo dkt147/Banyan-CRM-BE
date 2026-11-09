@@ -13,7 +13,10 @@
     "seed:pipelines": "node src/seed/seedPipelines.js",
     "seed:dashboard-demo": "node src/seed/seedDashboardDemoDeals.js",
     "seed:availability": "node src/seed/seedAvailabilityDemo.js",
-    "test:assistant-search": "node --test tests/assistant-search-utils.test.js"
+    "test:assistant-search": "node --test tests/assistant-search-utils.test.js",
+    "migrate": "node src/scripts/migrate.js",
+    "test:phase1": "node --test --test-concurrency=1 tests/phase1.integration.test.js",
+    "test": "node --test --test-concurrency=1 \"tests/**/*.test.js\""
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

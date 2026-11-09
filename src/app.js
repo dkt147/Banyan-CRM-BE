@@ -3,6 +3,7 @@ import { env } from "./config/env.js";
 import cookieParser from "cookie-parser";
 import morgan from "morgan";
 import { securityMiddleware } from "./middleware/security.middleware.js";
+import { apiLimiter } from "./middleware/rateLimit.middleware.js";
 import {
   errorHandler,
   notFoundHandler,
@@ -43,6 +44,10 @@ import assistantRoutes from "./routes/assistant.routes.js";
 import webhookRoutes from "./routes/webhook.routes.js";
 import publicEnquiryRoutes from "./routes/publicEnquiries.routes.js";
 import publicInvoicePaymentRoutes from "./routes/publicInvoicePayment.routes.js";
+import resourcesRoutes from "./routes/resources.routes.js";
+import relatedRoutes from "./routes/related.routes.js";
+import searchRoutes from "./routes/search.routes.js";
+import formsRoutes from "./routes/forms.routes.js";
 
 const app = express();
 app.disable("x-powered-by");
@@ -60,6 +65,7 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true, limit: "2mb" }));
 app.use(cookieParser());
+app.use(apiLimiter);
 app.use(morgan("dev"));
 app.get("/", (_req, res) =>
   res.json({
@@ -86,6 +92,10 @@ app.use("/api/v1/templates", templateRoutes);
 app.use("/api/v1/calendar", calendarRoutes);
 app.use("/api/v1/calendar-events", calendarEventRoutes);
 app.use("/api/v1/bookings", bookingRoutes);
+app.use("/api/v1/resources", resourcesRoutes);
+app.use("/api/v1/related", relatedRoutes);
+app.use("/api/v1/search", searchRoutes);
+app.use("/api/v1/forms", formsRoutes);
 app.use("/api/v1/agreements", agreementRoutes);
 app.use("/api/v1/invoices", invoiceRoutes);
 app.use("/api/v1/payments", paymentRoutes);

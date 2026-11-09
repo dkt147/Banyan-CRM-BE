@@ -9,8 +9,15 @@ import { PipelineStage } from "../models/PipelineStage.js";
 import { Task } from "../models/Task.js";
 import { Notification } from "../models/Notification.js";
 import { Invoice } from "../models/Invoice.js";
+import { Resource } from "../models/Resource.js";
+import { hkMonthRange } from "../utils/hkTime.js";
+import {
+  activeBookingFilter,
+  displayStatus,
+  isActiveBooking,
+  prepareBookingPayload,
+} from "../services/booking.service.js";
 
-const ACTIVE_BOOKING_STATUSES = ["held", "pending", "confirmed"];
 const VENUE_TYPES = ["studio", "venue", "photoshoot", "podcast"];
 const TRIAL_TYPES = ["trial", "viewing"];
 const BOOKING_TYPE_LABELS = {
@@ -37,7 +44,7 @@ export const availability = asyncHandler(async (req, res) => {
     );
   const conflicts = await Booking.find({
     workspaceId: req.workspaceId,
-    status: { $in: ["held", "pending", "confirmed"] },
+    ...activeBookingFilter(),
     ...(req.query.resourceName ? { resourceName: String(req.query.resourceName) } : {}),
     startAt: { $lt: end },
     endAt: { $gt: start },
@@ -53,10 +60,12 @@ export const hold = asyncHandler(async (req, res) => {
   if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf()) || end <= start)
     throw new AppError("Valid startAt and endAt (end after start) are required", 400, "INVALID_DATES");
   // Conflicts are scoped to the same room when one is named, so two different rooms can be held at once.
+  // Staff holds need an existing contact; website holds are matched email-first, then phone.
+  const payload = await prepareBookingPayload(req.workspaceId, req.user._id, req.body, { mode: "create" });
   const conflict = await Booking.exists({
     workspaceId: req.workspaceId,
-    status: { $in: ACTIVE_BOOKING_STATUSES },
-    ...(req.body.resourceName ? { resourceName: req.body.resourceName } : {}),
+    ...activeBookingFilter(),
+    ...(payload.resourceName ? { resourceName: payload.resourceName } : {}),
     startAt: { $lt: end },
     endAt: { $gt: start },
   });
@@ -64,7 +73,7 @@ export const hold = asyncHandler(async (req, res) => {
     throw new AppError("Slot is not available", 409, "SLOT_UNAVAILABLE");
   const holdMinutes = Math.max(1, Number(req.body.holdMinutes) || 15);
   const b = await Booking.create({
-    ...req.body,
+    ...payload,
     workspaceId: req.workspaceId,
     createdBy: req.user._id,
     status: "held",
@@ -80,7 +89,7 @@ export const confirm = asyncHandler(async (req, res) => {
     {
       _id: req.params.id,
       workspaceId: req.workspaceId,
-      status: { $in: ["held", "pending"] },
+      status: { $in: ["held", "pending", "pending_payment"] },
     },
     { status: "confirmed", holdExpiresAt: null },
     { new: true },
@@ -145,7 +154,9 @@ function bookingCategory(booking) {
   return "confirmed";
 }
 
-function bookingItem(booking) {
+const refId = (value) => (value && typeof value === "object" ? value._id : value) || null;
+
+function bookingItem(booking, now = new Date()) {
   const who = personName(booking.contactId) || (booking.companyId?.name ?? "");
   const subtitle =
     booking.subtitle ||
@@ -158,11 +169,21 @@ function bookingItem(booking) {
     subtitle,
     bookingType: booking.bookingType || "",
     resourceName: booking.resourceName || "",
-    status: booking.status,
+    resourceId: refId(booking.resourceId) ? String(refId(booking.resourceId)) : null,
+    // status = what users see (expired holds show as expired); rawStatus = stored value.
+    status: displayStatus(booking, now),
+    rawStatus: booking.status,
+    paymentStatus: booking.paymentStatus || "not_required",
+    amountMinor: booking.amountMinor ?? null,
     startAt: booking.startAt,
     endAt: booking.endAt,
     holdExpiresAt: booking.holdExpiresAt || null,
     source: booking.source || "manual",
+    contactId: refId(booking.contactId) ? String(refId(booking.contactId)) : null,
+    contactName: personName(booking.contactId),
+    companyId: refId(booking.companyId) ? String(refId(booking.companyId)) : null,
+    companyName: booking.companyId?.name || "",
+    dealId: refId(booking.dealId) ? String(refId(booking.dealId)) : null,
   };
 }
 
@@ -181,13 +202,14 @@ function eventItem(event) {
     endAt: event.endAt,
     holdExpiresAt: null,
     source: event.externalProvider === "google_calendar" ? "google" : "manual",
+    contactId: refId(event.contactId) ? String(refId(event.contactId)) : null,
+    contactName: personName(event.contactId),
   };
 }
 
 function buildConflicts(bookings) {
-  const active = bookings.filter(
-    (b) => ACTIVE_BOOKING_STATUSES.includes(b.status) && b.resourceName,
-  );
+  const now = new Date();
+  const active = bookings.filter((b) => isActiveBooking(b, now) && b.resourceName);
   const conflicts = [];
   for (let i = 0; i < active.length; i += 1) {
     for (let j = i + 1; j < active.length; j += 1) {
@@ -225,14 +247,14 @@ export const week = asyncHandler(async (req, res) => {
     throw new AppError("Valid from date is required", 400, "INVALID_DATES");
   const days = Math.min(14, Math.max(1, Number(req.query.days) || 5));
   const rangeEnd = new Date(from.getTime() + days * 86400000);
-  const monthStart = new Date(from.getFullYear(), from.getMonth(), 1);
-  const monthEnd = new Date(from.getFullYear(), from.getMonth() + 1, 1);
+  // Meeting-room credits are monthly in Hong Kong time, not the server's time zone.
+  const { start: monthStart, end: monthEnd } = hkMonthRange(from);
 
   const bookingPopulate = ["contactId", "companyId"];
-  const [bookings, events, inboundRows, creditBookings, companies, contacts] = await Promise.all([
+  const [bookings, events, inboundRows, creditBookings, companies, contacts, resources] = await Promise.all([
+    // All statuses are returned; the client hides cancelled/expired unless asked (D2).
     Booking.find({
       workspaceId: req.workspaceId,
-      status: { $in: [...ACTIVE_BOOKING_STATUSES, "completed"] },
       startAt: { $lt: rangeEnd },
       endAt: { $gt: from },
     }).populate(bookingPopulate).sort({ startAt: 1 }),
@@ -257,6 +279,7 @@ export const week = asyncHandler(async (req, res) => {
       .select("name meetingRoomCreditHours"),
     Contact.find({ workspaceId: req.workspaceId, isArchived: false, meetingRoomCreditHours: { $gt: 0 } })
       .select("firstName lastName meetingRoomCreditHours"),
+    Resource.find({ workspaceId: req.workspaceId, isActive: true }).select("name type capacity sortOrder").sort({ sortOrder: 1, name: 1 }).lean(),
   ]);
 
   // Meeting-room credits: monthly allowance vs hours used this month, per company or contact.
@@ -309,11 +332,23 @@ export const week = asyncHandler(async (req, res) => {
     };
   });
 
+  // Resource list for the grid: configured resources first, then any legacy names in range.
+  const resourceNames = new Set(resources.map((r) => r.name));
+  const resourceList = [
+    ...resources.map((r) => ({ id: String(r._id), name: r.name, type: r.type || "", configured: true })),
+    ...[...new Set(bookings.map((b) => b.resourceName).filter(Boolean))]
+      .filter((name) => !resourceNames.has(name))
+      .sort()
+      .map((name) => ({ id: null, name, type: "", configured: false })),
+  ];
+  const now = new Date();
+
   res.json({
     success: true,
     data: {
       range: { startAt: from, endAt: rangeEnd, days },
-      items: [...bookings.map(bookingItem), ...events.map(eventItem)].sort(
+      resources: resourceList,
+      items: [...bookings.map((b) => bookingItem(b, now)), ...events.map(eventItem)].sort(
         (x, y) => new Date(x.startAt) - new Date(y.startAt),
       ),
       credits,

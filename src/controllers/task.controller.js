@@ -26,7 +26,7 @@ import {
 export const createTaskController = asyncHandler(async (req, res) => {
   const data = createTaskSchema.parse(req.body);
 
-  const task = await createTask(data, req.user.id, req.user.workspaceId);
+  const task = await createTask(data, req.user.id, req.workspaceId);
 
   return res.status(201).json({
     success: true,
@@ -80,7 +80,7 @@ export const getTasksController = asyncHandler(async (req, res) => {
 export const getTaskController = asyncHandler(async (req, res) => {
   const { taskId } = taskIdParamSchema.parse(req.params);
 
-  const task = await getTaskById(taskId, req.user.id);
+  const task = await getTaskById(taskId, req.workspaceId);
 
   return res.status(200).json({
     success: true,
@@ -98,7 +98,7 @@ export const updateTaskController = asyncHandler(async (req, res) => {
 
   const data = updateTaskSchema.parse(req.body);
 
-  const task = await updateTask(taskId, req.user.id, data);
+  const task = await updateTask(taskId, req.workspaceId, data);
 
   return res.status(200).json({
     success: true,
@@ -118,7 +118,7 @@ export const completeTaskController = asyncHandler(async (req, res) => {
   // an unexpected body according to the existing schema.
   completeTaskSchema.parse(req.body || {});
 
-  const task = await completeTask(taskId, req.user.id);
+  const task = await completeTask(taskId, req.workspaceId);
 
   return res.status(200).json({
     success: true,
@@ -136,7 +136,7 @@ export const snoozeTaskController = asyncHandler(async (req, res) => {
 
   const { snoozedUntil } = snoozeTaskSchema.parse(req.body);
 
-  const task = await snoozeTask(taskId, req.user.id, snoozedUntil);
+  const task = await snoozeTask(taskId, req.workspaceId, snoozedUntil);
 
   return res.status(200).json({
     success: true,
@@ -152,7 +152,7 @@ export const snoozeTaskController = asyncHandler(async (req, res) => {
 export const deleteTaskController = asyncHandler(async (req, res) => {
   const { taskId } = taskIdParamSchema.parse(req.params);
 
-  const result = await deleteTask(taskId, req.user.id);
+  const result = await deleteTask(taskId, req.workspaceId);
 
   return res.status(200).json({
     success: true,

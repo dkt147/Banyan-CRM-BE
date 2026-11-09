@@ -31,7 +31,7 @@ export async function getContactsController(req, res) {
 
   const result = await getContacts({
     ...query,
-    ownerId: req.user.id,
+    workspaceId: req.user.workspaceId,
   });
 
   return res.status(200).json({
@@ -45,7 +45,7 @@ export async function getContactsController(req, res) {
 export async function getContactController(req, res) {
   const { contactId } = contactIdParamSchema.parse(req.params);
 
-  const contact = await getContactById(contactId, req.user.id);
+  const contact = await getContactById(contactId, req.user.workspaceId);
 
   return res.status(200).json({
     success: true,
@@ -59,7 +59,7 @@ export async function updateContactController(req, res) {
 
   const data = updateContactSchema.parse(req.body);
 
-  const contact = await updateContact(contactId, req.user.id, req.user.workspaceId, data);
+  const contact = await updateContact(contactId, req.user.workspaceId, data);
 
   return res.status(200).json({
     success: true,
@@ -71,7 +71,7 @@ export async function updateContactController(req, res) {
 export async function archiveContactController(req, res) {
   const { contactId } = contactIdParamSchema.parse(req.params);
 
-  const contact = await archiveContact(contactId, req.user.id);
+  const contact = await archiveContact(contactId, req.user.workspaceId);
 
   return res.status(200).json({
     success: true,
@@ -83,7 +83,7 @@ export async function archiveContactController(req, res) {
 export async function deleteContactController(req, res) {
   const { contactId } = contactIdParamSchema.parse(req.params);
 
-  const result = await deleteContact(contactId, req.user.id);
+  const result = await deleteContact(contactId, req.user.workspaceId);
 
   return res.status(200).json({
     success: true,

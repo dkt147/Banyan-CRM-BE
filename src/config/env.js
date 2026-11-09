@@ -7,6 +7,13 @@ for (const key of required) {
 
 export const env = {
   NODE_ENV: process.env.NODE_ENV || "development",
+  MONGODB_AUTO_INDEX: process.env.MONGODB_AUTO_INDEX !== "false",
+  // Public self-registration creates a new workspace + admin. Off in production unless
+  // explicitly enabled (decision 2026-11-10).
+  ALLOW_PUBLIC_REGISTRATION:
+    process.env.ALLOW_PUBLIC_REGISTRATION != null && process.env.ALLOW_PUBLIC_REGISTRATION !== ""
+      ? process.env.ALLOW_PUBLIC_REGISTRATION === "true"
+      : (process.env.NODE_ENV || "development") !== "production",
   PORT: Number(process.env.PORT || 5000),
   SEED_ADMIN_EMAIL: process.env.SEED_ADMIN_EMAIL || "",
   SEED_ADMIN_PASSWORD: process.env.SEED_ADMIN_PASSWORD || "", 

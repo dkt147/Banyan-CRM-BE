@@ -1,6 +1,5 @@
 import helmet from "helmet";
 import cors from "cors";
-import rateLimit from "express-rate-limit";
 import { env } from "../config/env.js";
 
 function normalizedOrigin(value) {
@@ -24,10 +23,7 @@ export const securityMiddleware = [
     },
     credentials: true,
   }),
-  rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: 300,
-    standardHeaders: true,
-    legacyHeaders: false,
-  }),
+  // Rate limiting moved to rateLimit.middleware.js (per-user API limit, login limits,
+  // webhooks exempt). The old global 300-per-15-minutes-per-IP limit made a shared
+  // office IP lock out the whole team.
 ];

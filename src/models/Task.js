@@ -20,6 +20,13 @@ const schema = new mongoose.Schema(
       index: true,
     },
     dealId: { type: mongoose.Schema.Types.ObjectId, ref: "Deal", index: true },
+    // Optional origin links so automation/workflow-created tasks stay traceable.
+    bookingId: { type: mongoose.Schema.Types.ObjectId, ref: "Booking", index: true },
+    workflowRunId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "AutomationExecution",
+      index: true,
+    },
     assignedTo: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",

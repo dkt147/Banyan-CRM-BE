@@ -91,7 +91,8 @@ export const revenue = asyncHandler(async (req, res) => {
     { $match: { workspaceId: req.workspaceId, status: "paid" } },
     {
       $group: {
-        _id: { $dateToString: { format: "%Y-%m", date: "$paidAt" } },
+        // Group by Hong Kong month, not UTC month.
+        _id: { $dateToString: { format: "%Y-%m", date: "$paidAt", timezone: "Asia/Hong_Kong" } },
         revenue: { $sum: "$total" },
       },
     },

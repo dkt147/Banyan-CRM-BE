@@ -2,9 +2,12 @@ import { Company } from "../models/Company.js";
 import { Contact } from "../models/Contact.js";
 import { Deal } from "../models/Deal.js";
 import { AppError } from "../utils/AppError.js";
+import { escapeRegex } from "../utils/phone.js";
+
+// Companies are workspace records (same as contacts and deals), so a company linked
+// from a contact, deal or booking opens for every CRM user in the workspace.
 
 export async function createCompany(data) {
-  console.log("[CREATE COMPANY SERVICE] data:", data);
 
   const company = await Company.create(data);
 
@@ -18,32 +21,46 @@ export async function getCompanies({
   limit = 20,
   search,
   isArchived = false,
+  sort = "createdAt",
+  order = "desc",
 }) {
   const skip = (page - 1) * limit;
 
   const filter = {
     workspaceId,
-    ownerId,
-    isArchived,
+    ...(isArchived === null ? {} : { isArchived }),
   };
 
   if (search?.trim()) {
-    filter.$text = {
-      $search: search.trim(),
-    };
+    const rx = { $regex: escapeRegex(search.trim()), $options: "i" };
+    filter.$or = [{ name: rx }, { legalName: rx }, { email: rx }];
   }
 
   const [companies, total] = await Promise.all([
     Company.find(filter)
-      .sort({ createdAt: -1 })
+      .sort({ [sort === "name" ? "name" : "createdAt"]: order === "asc" ? 1 : -1 })
       .skip(skip)
       .limit(limit),
 
     Company.countDocuments(filter),
   ]);
 
+  const ids = companies.map((c) => c._id);
+  const [contactRows, dealRows] = ids.length
+    ? await Promise.all([
+        Contact.aggregate([{ $match: { workspaceId, companyId: { $in: ids }, isArchived: false } }, { $group: { _id: "$companyId", n: { $sum: 1 } } }]),
+        Deal.aggregate([{ $match: { workspaceId, companyId: { $in: ids }, status: "open" } }, { $group: { _id: "$companyId", n: { $sum: 1 } } }]),
+      ])
+    : [[], []];
+  const contactCounts = new Map(contactRows.map((r) => [String(r._id), r.n]));
+  const dealCounts = new Map(dealRows.map((r) => [String(r._id), r.n]));
+
   return {
-    companies,
+    companies: companies.map((c) => ({
+      ...c.toJSON(),
+      contactCount: contactCounts.get(String(c._id)) || 0,
+      openDealCount: dealCounts.get(String(c._id)) || 0,
+    })),
     pagination: {
       page,
       limit,
@@ -56,7 +73,6 @@ export async function getCompanies({
 export async function getCompanyById(companyId, ownerId, workspaceId) {
   const company = await Company.findOne({
     _id: companyId,
-    ownerId,
     workspaceId,
   });
 
@@ -67,11 +83,11 @@ export async function getCompanyById(companyId, ownerId, workspaceId) {
   return company;
 }
 
-export async function updateCompany(companyId, ownerId, data) {
+export async function updateCompany(companyId, workspaceId, data) {
   const company = await Company.findOneAndUpdate(
     {
       _id: companyId,
-      ownerId,
+      workspaceId,
     },
     {
       $set: data,
@@ -89,11 +105,11 @@ export async function updateCompany(companyId, ownerId, data) {
   return company;
 }
 
-export async function archiveCompany(companyId, ownerId) {
+export async function archiveCompany(companyId, workspaceId) {
   const company = await Company.findOneAndUpdate(
     {
       _id: companyId,
-      ownerId,
+      workspaceId,
     },
     {
       $set: {
@@ -112,10 +128,10 @@ export async function archiveCompany(companyId, ownerId) {
   return company;
 }
 
-export async function deleteCompany(companyId, ownerId) {
+export async function deleteCompany(companyId, workspaceId) {
   const company = await Company.findOne({
     _id: companyId,
-    ownerId,
+    workspaceId,
   });
 
   if (!company) {

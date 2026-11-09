@@ -8,6 +8,7 @@ import { User } from "../models/User.js";
 import { Workspace } from "../models/Workspace.js";
 import { env } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
+import { findContactByEmailOrPhone } from "./contactMatching.service.js";
 
 const SERVICE_ROUTING = {
   "virtual office": {
@@ -308,7 +309,8 @@ export async function createPublicEnquiry(payload) {
 
   const email = payload.email.toLowerCase();
   const fullName = `${payload.firstName} ${payload.lastName}`.trim();
-  let contact = await Contact.findOne({ workspaceId: workspace._id, email });
+  // Match an existing contact by email first, then by phone, before creating one.
+  let { contact } = await findContactByEmailOrPhone(workspace._id, { email, phone: payload.phone });
   if (!contact) {
     contact = await Contact.create({
       workspaceId: workspace._id,
@@ -326,6 +328,7 @@ export async function createPublicEnquiry(payload) {
   } else {
     contact.firstName = payload.firstName;
     contact.lastName = payload.lastName;
+    if (!contact.email) contact.email = email;
     if (payload.phone) contact.phone = payload.phone;
     if (!contact.source) contact.source = "website";
     contact.tags = [...new Set([...(contact.tags || []), "website_enquiry"])];

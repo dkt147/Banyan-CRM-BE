@@ -1,3 +1,4 @@
+import { allDayToHk } from "../utils/hkTime.js";
 import { Integration } from "../models/Integration.js";
 import { CalendarEvent } from "../models/CalendarEvent.js";
 import { getProviderAccessToken, providerJson } from "./providerApi.service.js";
@@ -31,8 +32,8 @@ export async function pollGoogleCalendars() {
                 await CalendarEvent.updateOne(filter, { $set: { status: "cancelled", "metadata.googleEventStatus": "cancelled", "metadata.googleSyncedAt": new Date() } });
                 continue;
               }
-              const start = external.start?.dateTime || (external.start?.date ? `${external.start.date}T00:00:00.000Z` : null);
-              const end = external.end?.dateTime || (external.end?.date ? `${external.end.date}T00:00:00.000Z` : null);
+              const start = external.start?.dateTime || (external.start?.date ? allDayToHk(external.start.date) : null);
+              const end = external.end?.dateTime || (external.end?.date ? allDayToHk(external.end.date) : null);
               const startAt = start ? new Date(start) : null; const endAt = end ? new Date(end) : null;
               if (!startAt || !endAt || !Number.isFinite(startAt.getTime()) || !Number.isFinite(endAt.getTime()) || endAt <= startAt) continue;
               await CalendarEvent.findOneAndUpdate(filter, { $set: { title: String(external.summary || "(No title)").slice(0, 250), type: "meeting", startAt, endAt, timezone: external.start?.timeZone || process.env.GOOGLE_CALENDAR_TIMEZONE || "Asia/Hong_Kong", location: String(external.location || "").slice(0, 1000), status: "scheduled", notes: String(external.description || "").slice(0, 10000), externalProvider: "google_calendar", externalEventId: external.id, metadata: { googleCalendarId: calendarId, googleEventHtmlLink: external.htmlLink || "", googleEventStatus: external.status || "confirmed", googleUpdatedAt: external.updated || null, googleSyncedAt: new Date(), googleAllDay: Boolean(external.start?.date) } }, $setOnInsert: { workspaceId: integration.workspaceId } }, { upsert: true, new: true, setDefaultsOnInsert: true });

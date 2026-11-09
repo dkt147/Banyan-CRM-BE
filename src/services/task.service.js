@@ -5,6 +5,7 @@ import { Deal } from "../models/Deal.js";
 import { Activity } from "../models/Activity.js";
 import { Workspace } from "../models/Workspace.js";
 import { AppError } from "../utils/AppError.js";
+import { escapeRegex } from "../utils/phone.js";
 
 const QUIET_DEAL_DAYS = 5;
 
@@ -126,11 +127,15 @@ export async function getTaskSummary({ ownerId, workspaceId }) {
   };
 }
 
-async function validateRelations(data, ownerId) {
+// Linked records must belong to the same workspace. They used to be checked against the
+// current user as owner, which rejected links to a colleague's deal or contact (C2).
+// When a deal is linked without a contact, the deal's contact/company are filled in so
+// the task can always navigate to both.
+async function validateRelations(data, workspaceId) {
   if (data.contactId) {
     const contact = await Contact.findOne({
       _id: data.contactId,
-      ownerId,
+      workspaceId,
     });
 
     if (!contact) {
@@ -141,7 +146,7 @@ async function validateRelations(data, ownerId) {
   if (data.companyId) {
     const company = await Company.findOne({
       _id: data.companyId,
-      ownerId,
+      workspaceId,
     });
 
     if (!company) {
@@ -152,17 +157,26 @@ async function validateRelations(data, ownerId) {
   if (data.dealId) {
     const deal = await Deal.findOne({
       _id: data.dealId,
-      ownerId,
-    });
+      workspaceId,
+    }).select("contactId companyId");
 
     if (!deal) {
       throw new AppError("Deal not found.", 404, "DEAL_NOT_FOUND");
     }
+
+    if (!data.contactId && deal.contactId) data.contactId = deal.contactId;
+    if (!data.companyId && deal.companyId) data.companyId = deal.companyId;
   }
 }
 
+const DEAL_POPULATE = {
+  path: "dealId",
+  select: "title value status currency dealNumber contactId companyId",
+  populate: { path: "contactId", select: "firstName lastName email" },
+};
+
 export async function createTask(data, ownerId, workspaceId) {
-  await validateRelations(data, ownerId);
+  await validateRelations(data, workspaceId);
 
   const task = await Task.create({
     ...data,
@@ -185,7 +199,7 @@ export async function createTask(data, ownerId, workspaceId) {
     },
   });
 
-  return getTaskById(task._id, ownerId);
+  return getTaskById(task._id, workspaceId);
 }
 
 export async function getTasks({
@@ -199,21 +213,15 @@ export async function getTasks({
   contactId,
   companyId,
   dealId,
+  search,
   from,
   to,
 }) {
   const skip = (page - 1) * limit;
 
+  // Every role can view every task in the workspace (brief section 7, confirmed
+  // 2026-11-10). Use the assignedTo filter for "my tasks".
   const filter = { workspaceId };
-
-  /*
-   * A user can see:
-   * - tasks they created
-   * - tasks assigned to them
-   *
-   * This prevents unrelated users' tasks from leaking.
-   */
-  filter.$or = [{ createdBy: ownerId }, { assignedTo: ownerId }];
 
   if (status) {
     filter.status = status;
@@ -239,6 +247,11 @@ export async function getTasks({
     filter.dealId = dealId;
   }
 
+  if (search) {
+    const rx = { $regex: escapeRegex(search), $options: "i" };
+    filter.$and = [{ $or: [{ title: rx }, { description: rx }] }];
+  }
+
   if (from || to) {
     filter.dueAt = {};
 
@@ -257,7 +270,7 @@ export async function getTasks({
       .populate("createdBy", "name email role")
       .populate("contactId", "firstName lastName email")
       .populate("companyId", "name")
-      .populate("dealId", "title value status")
+      .populate(DEAL_POPULATE)
       .sort({
         dueAt: 1,
         createdAt: -1,
@@ -279,16 +292,16 @@ export async function getTasks({
   };
 }
 
-export async function getTaskById(taskId, ownerId) {
+export async function getTaskById(taskId, workspaceId) {
   const task = await Task.findOne({
     _id: taskId,
-    $or: [{ createdBy: ownerId }, { assignedTo: ownerId }],
+    workspaceId,
   })
     .populate("assignedTo", "name email role")
     .populate("createdBy", "name email role")
     .populate("contactId", "firstName lastName email phone")
     .populate("companyId", "name")
-    .populate("dealId", "title value status");
+    .populate(DEAL_POPULATE);
 
   if (!task) {
     throw new AppError("Task not found.", 404, "TASK_NOT_FOUND");
@@ -297,17 +310,18 @@ export async function getTaskById(taskId, ownerId) {
   return task;
 }
 
-export async function updateTask(taskId, ownerId, data) {
+export async function updateTask(taskId, workspaceId, data) {
   const task = await Task.findOne({
     _id: taskId,
-    $or: [{ createdBy: ownerId }, { assignedTo: ownerId }],
+    workspaceId,
   });
 
   if (!task) {
     throw new AppError("Task not found.", 404, "TASK_NOT_FOUND");
   }
 
-  await validateRelations(data, ownerId);
+  // Only validate links that this update changes; clearing a link stays allowed.
+  await validateRelations(data, task.workspaceId);
 
   if (data.status === "completed" && task.status !== "completed") {
     data.completedAt = new Date();
@@ -328,17 +342,17 @@ export async function updateTask(taskId, ownerId, data) {
     },
   );
 
-  return getTaskById(updatedTask._id, ownerId);
+  return getTaskById(updatedTask._id, workspaceId);
 }
 
-export async function completeTask(taskId, ownerId) {
-  return updateTask(taskId, ownerId, {
+export async function completeTask(taskId, workspaceId) {
+  return updateTask(taskId, workspaceId, {
     status: "completed",
     completedAt: new Date(),
   });
 }
 
-export async function snoozeTask(taskId, ownerId, snoozedUntil) {
+export async function snoozeTask(taskId, workspaceId, snoozedUntil) {
   if (!snoozedUntil) {
     throw new AppError(
       "snoozedUntil is required.",
@@ -353,16 +367,16 @@ export async function snoozeTask(taskId, ownerId, snoozedUntil) {
     throw new AppError("Invalid snooze date.", 400, "INVALID_SNOOZE_DATE");
   }
 
-  return updateTask(taskId, ownerId, {
+  return updateTask(taskId, workspaceId, {
     status: "snoozed",
     snoozedUntil: date,
   });
 }
 
-export async function deleteTask(taskId, ownerId) {
+export async function deleteTask(taskId, workspaceId) {
   const task = await Task.findOne({
     _id: taskId,
-    $or: [{ createdBy: ownerId }, { assignedTo: ownerId }],
+    workspaceId,
   });
 
   if (!task) {

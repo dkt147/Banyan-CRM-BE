@@ -50,7 +50,17 @@ export const createPipelineStageSchema = z.object({
   isActive: z.boolean().default(true),
 });
 
-export const updatePipelineStageSchema = createPipelineStageSchema.partial();
+// No defaults on update: .partial() would otherwise reset sortOrder, probability and
+// the won/lost/active flags whenever a stage is renamed.
+export const updatePipelineStageSchema = z.object({
+  name: z.string().trim().min(1, "Stage name is required").max(150),
+  key: keySchema,
+  sortOrder: z.number().int().min(0),
+  probability: z.number().min(0).max(100),
+  isClosedWon: z.boolean(),
+  isClosedLost: z.boolean(),
+  isActive: z.boolean(),
+}).partial();
 
 export const pipelineListQuerySchema = z.object({
   includeInactive: z

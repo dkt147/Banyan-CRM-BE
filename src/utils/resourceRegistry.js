@@ -24,6 +24,8 @@ import { Integration } from "../models/Integration.js";
 import { Notification } from "../models/Notification.js";
 import { Document } from "../models/Document.js";
 import { AuditLog } from "../models/AuditLog.js";
+import { Resource } from "../models/Resource.js";
+import { Form } from "../models/Form.js";
 import { createResourceService } from "../services/resource.service.js";
 const defs = {
   companies: [
@@ -129,8 +131,8 @@ const defs = {
   bookings: [
     Booking,
     {
-      searchable: ["resourceName", "bookingType"],
-      filters: ["status", "contactId", "dealId"],
+      searchable: ["resourceName", "bookingType", "title"],
+      filters: ["status", "contactId", "dealId", "companyId", "resourceId", "source"],
       sortFields: ["startAt", "createdAt"],
       createdByField: "createdBy",
       populate: ["contactId", "companyId", "dealId", "createdBy"],
@@ -281,6 +283,23 @@ const defs = {
         "agreementId",
         "uploadedBy",
       ],
+    },
+  ],
+  forms: [
+    Form,
+    {
+      searchable: ["name", "slug", "type"],
+      filters: ["type", "isActive"],
+      sortFields: ["createdAt", "name"],
+    },
+  ],
+  resources: [
+    Resource,
+    {
+      searchable: ["name", "type"],
+      filters: ["type", "isActive"],
+      sortFields: ["sortOrder", "name", "createdAt"],
+      defaultSort: { sortOrder: 1 },
     },
   ],
   auditLogs: [

@@ -50,8 +50,13 @@ export const companyListQuerySchema = z.object({
 
   search: z.string().trim().max(200).optional(),
 
+  sort: z.enum(["createdAt", "name"]).optional(),
+
+  order: z.enum(["asc", "desc"]).optional(),
+
   isArchived: z
-    .enum(["true", "false"])
-    .transform((value) => value === "true")
+    // "all" returns active and archived records.
+    .enum(["true", "false", "all"])
+    .transform((value) => (value === "all" ? null : value === "true"))
     .default("false"),
 });

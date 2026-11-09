@@ -15,7 +15,6 @@ import {
 } from "../validators/company.validators.js";
 
 export async function createCompanyController(req, res) {
-  console.log("[CREATE COMPANY] req.user:", req.user);
 
   const data = createCompanySchema.parse(req.body);
 
@@ -70,7 +69,7 @@ export async function updateCompanyController(req, res) {
 
   const data = updateCompanySchema.parse(req.body);
 
-  const company = await updateCompany(companyId, req.user.id, data);
+  const company = await updateCompany(companyId, req.user.workspaceId, data);
 
   return res.status(200).json({
     success: true,
@@ -82,7 +81,7 @@ export async function updateCompanyController(req, res) {
 export async function archiveCompanyController(req, res) {
   const { companyId } = companyIdParamSchema.parse(req.params);
 
-  const company = await archiveCompany(companyId, req.user.id);
+  const company = await archiveCompany(companyId, req.user.workspaceId);
 
   return res.status(200).json({
     success: true,
@@ -94,7 +93,7 @@ export async function archiveCompanyController(req, res) {
 export async function deleteCompanyController(req, res) {
   const { companyId } = companyIdParamSchema.parse(req.params);
 
-  const result = await deleteCompany(companyId, req.user.id);
+  const result = await deleteCompany(companyId, req.user.workspaceId);
 
   return res.status(200).json({
     success: true,

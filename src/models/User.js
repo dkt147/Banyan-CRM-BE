@@ -25,7 +25,8 @@ const schema = new mongoose.Schema(
     passwordHash: { type: String, required: true, select: false },
     role: {
       type: String,
-      enum: ["admin", "manager", "operator"],
+      // admin = Admin; manager/operator = Sales; read_only = Read-only (brief section 7).
+      enum: ["admin", "manager", "operator", "read_only"],
       default: "operator",
       index: true,
     },

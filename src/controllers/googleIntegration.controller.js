@@ -1,3 +1,4 @@
+import { allDayToHk } from "../utils/hkTime.js";
 import { User } from "../models/User.js";
 import { Deal } from "../models/Deal.js";
 import { PipelineStage } from "../models/PipelineStage.js";
@@ -576,8 +577,8 @@ export const syncGoogleCalendarEvents = asyncHandler(async (req, res) => {
       continue;
     }
 
-    const startValue = external.start?.dateTime || (external.start?.date ? `${external.start.date}T00:00:00.000Z` : null);
-    const endValue = external.end?.dateTime || (external.end?.date ? `${external.end.date}T00:00:00.000Z` : null);
+    const startValue = external.start?.dateTime || (external.start?.date ? allDayToHk(external.start.date) : null);
+    const endValue = external.end?.dateTime || (external.end?.date ? allDayToHk(external.end.date) : null);
     const startAt = startValue ? new Date(startValue) : null;
     const endAt = endValue ? new Date(endValue) : null;
     if (!startAt || !endAt || Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime()) || endAt <= startAt) {

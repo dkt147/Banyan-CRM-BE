@@ -38,7 +38,12 @@ export const createContactSchema = z.object({
   isArchived: z.boolean().optional(),
 });
 
-export const updateContactSchema = createContactSchema.partial();
+// Partial updates must not re-apply create-time defaults (Zod applies .default()
+// inside .partial(), which used to blank lastName and reset language on every PATCH).
+export const updateContactSchema = createContactSchema.extend({
+  lastName: z.string().trim().max(100),
+  language: z.string().trim().min(2).max(10),
+}).partial();
 
 export const contactIdParamSchema = z.object({
   contactId: objectId,
@@ -53,8 +58,13 @@ export const contactListQuerySchema = z.object({
 
   companyId: objectId.optional(),
 
+  ownerId: objectId.optional(),
+
+  tag: z.enum(contactTags).optional(),
+
   isArchived: z
-    .enum(["true", "false"])
-    .transform((value) => value === "true")
+    // "all" returns active and archived records.
+    .enum(["true", "false", "all"])
+    .transform((value) => (value === "all" ? null : value === "true"))
     .default("false"),
 });

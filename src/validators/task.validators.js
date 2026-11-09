@@ -23,6 +23,11 @@ export const createTaskSchema = z.object({
 
   dealId: objectId.nullable().optional(),
 
+  // Origin links for workflow/booking-created tasks.
+  bookingId: objectId.nullable().optional(),
+
+  workflowRunId: objectId.nullable().optional(),
+
   assignedTo: objectId.optional(),
 
   dueAt: z.coerce.date(),
@@ -36,7 +41,23 @@ export const createTaskSchema = z.object({
   metadata: z.record(z.string(), z.any()).optional(),
 });
 
-export const updateTaskSchema = createTaskSchema.partial();
+// Partial updates must not re-apply create-time defaults (Zod applies .default()
+// inside .partial(), which used to reset status/priority/source on every PATCH).
+export const updateTaskSchema = z.object({
+  title: z.string().trim().min(1, "Task title is required").max(200),
+  description: z.string().trim().max(5000).nullable(),
+  contactId: objectId.nullable(),
+  companyId: objectId.nullable(),
+  dealId: objectId.nullable(),
+  bookingId: objectId.nullable(),
+  workflowRunId: objectId.nullable(),
+  assignedTo: objectId,
+  dueAt: z.coerce.date(),
+  priority: taskPriority,
+  status: taskStatus,
+  source: z.enum(["manual", "automation", "system"]),
+  metadata: z.record(z.string(), z.any()),
+}).partial();
 
 export const completeTaskSchema = z.object({});
 
@@ -64,6 +85,8 @@ export const taskListQuerySchema = z.object({
   companyId: objectId.optional(),
 
   dealId: objectId.optional(),
+
+  search: z.string().trim().max(200).optional(),
 
   from: z.coerce.date().optional(),
 
