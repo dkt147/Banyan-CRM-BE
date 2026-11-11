@@ -9,6 +9,7 @@ import { prepareBookingPayload, displayStatus, EXPIRING_STATUSES } from "../serv
 import { Contact } from "../models/Contact.js";
 import { contactSearchFilter } from "../services/contact.service.js";
 import { escapeRegex } from "../utils/phone.js";
+import { assertNotWpManaged, rejectWpRoomForCrmBooking } from "../services/wpRoomBooking.service.js";
 
 const service = resourceRegistry.bookings.service;
 const r = Router();
@@ -74,6 +75,7 @@ r.get(
 // except unlinked Google Calendar events). List/get/delete stay on the generic CRUD.
 r.post(
   "/",
+  rejectWpRoomForCrmBooking,
   asyncHandler(async (req, res) => {
     const data = await prepareBookingPayload(req.workspaceId, req.user._id, req.body, { mode: "create" });
     res.status(201).json({ success: true, data: await service.create(req.workspaceId, req.user._id, data) });
@@ -81,11 +83,22 @@ r.post(
 );
 r.patch(
   "/:id",
+  rejectWpRoomForCrmBooking,
   asyncHandler(async (req, res) => {
-    const existing = await Booking.findOne({ _id: req.params.id, workspaceId: req.workspaceId }).select("source companyId contactId");
+    const existing = await Booking.findOne({ _id: req.params.id, workspaceId: req.workspaceId }).select("source companyId contactId externalRef");
     if (!existing) throw new AppError("Resource not found.", 404, "NOT_FOUND");
+    // Re-linking the contact is allowed; everything else on a WordPress booking is owned by WordPress.
+    if (existing.externalRef && Object.keys(req.body || {}).some((k) => !["contactId", "companyId", "dealId"].includes(k)))
+      await assertNotWpManaged(req.workspaceId, req.params.id);
     const data = await prepareBookingPayload(req.workspaceId, req.user._id, req.body, { mode: "update", existing });
     res.json({ success: true, data: await service.update(req.workspaceId, req.params.id, req.user._id, data) });
+  }),
+);
+r.delete(
+  "/:id",
+  asyncHandler(async (req, _res, next) => {
+    await assertNotWpManaged(req.workspaceId, req.params.id);
+    next();
   }),
 );
 r.use(resourceRouter(service));

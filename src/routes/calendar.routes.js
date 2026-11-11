@@ -10,6 +10,8 @@ import {
   events,
   week,
 } from "../controllers/calendar.controller.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { assertNotWpManaged, rejectWpRoomForCrmBooking } from "../services/wpRoomBooking.service.js";
 
 const r = Router();
 r.use(requireAuth);
@@ -19,9 +21,15 @@ r.use(requireAuth);
 r.get("/availability", availability);
 r.get("/events", events);
 r.get("/week", week);
-r.post("/hold", hold);
-r.patch("/:id/confirm", confirm);
-r.patch("/:id/cancel", cancel);
+// Meeting rooms owned by WordPress are booked through WordPress only (no CRM-only holds).
+r.post("/hold", rejectWpRoomForCrmBooking, hold);
+// Bookings mirrored from WordPress are confirmed/cancelled in WordPress only.
+const notWpManaged = asyncHandler(async (req, _res, next) => {
+  await assertNotWpManaged(req.workspaceId, req.params.id);
+  next();
+});
+r.patch("/:id/confirm", notWpManaged, confirm);
+r.patch("/:id/cancel", notWpManaged, cancel);
 
 // Standard CalendarEvent CRUD remains available under /calendar.
 r.use(resourceRouter(resourceRegistry.calendar.service));

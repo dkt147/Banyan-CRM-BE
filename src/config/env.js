@@ -69,4 +69,14 @@ export const env = {
   DOCUSIGN_OAUTH_BASE_URL:
     process.env.DOCUSIGN_OAUTH_BASE_URL || "https://account-d.docusign.com",
   DOCUSIGN_RSA_PRIVATE_KEY: process.env.DOCUSIGN_RSA_PRIVATE_KEY || "",
+  // WordPress "Banyan Room Booking" plugin. WordPress owns room bookings; the CRM keeps a cache.
+  // Token from WP Admin > Room Bookings > Settings > API token. Server-side only.
+  BANYAN_CRM_TOKEN: process.env.BANYAN_CRM_TOKEN || "",
+  BANYAN_WP_API_URL: (process.env.BANYAN_WP_API_URL || "https://banyanworkspace.com/wp-json/banyan/v1/").replace(/\/*$/, "/"),
+  // Must be a banyanworkspace.com URL; WordPress replaces other domains with its homepage.
+  BANYAN_BOOKING_RETURN_URL:
+    process.env.BANYAN_BOOKING_RETURN_URL || "https://banyanworkspace.com/meeting-rooms-hong-kong/",
+  // Pull from GET /bookings?updated_since=…; webhooks only cover paid/cancelled, so pending holds,
+  // expiries and admin blocks rely on this. 0 disables the background job.
+  BANYAN_BOOKING_SYNC_MINUTES: Math.max(0, Number(process.env.BANYAN_BOOKING_SYNC_MINUTES ?? 2) || 0),
 };

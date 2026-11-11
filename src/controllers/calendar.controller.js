@@ -184,6 +184,10 @@ function bookingItem(booking, now = new Date()) {
     companyId: refId(booking.companyId) ? String(refId(booking.companyId)) : null,
     companyName: booking.companyId?.name || "",
     dealId: refId(booking.dealId) ? String(refId(booking.dealId)) : null,
+    // Set on rows mirrored from WordPress room bookings (read-only in the CRM).
+    externalRef: booking.externalRef || null,
+    wpStatus: booking.externalRef ? booking.metadata?.wp?.status || null : null,
+    wpRoomKey: booking.externalRef ? booking.metadata?.wp?.roomKey || null : null,
   };
 }
 

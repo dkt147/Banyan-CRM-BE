@@ -15,6 +15,7 @@
     "seed:availability": "node src/seed/seedAvailabilityDemo.js",
     "test:assistant-search": "node --test tests/assistant-search-utils.test.js",
     "migrate": "node src/scripts/migrate.js",
+    "sync:room-bookings": "node src/scripts/syncWpRoomBookings.js",
     "test:phase1": "node --test --test-concurrency=1 tests/phase1.integration.test.js",
     "test": "node --test --test-concurrency=1 \"tests/**/*.test.js\""
   },

@@ -51,6 +51,9 @@ const schema = new mongoose.Schema(
     amountMinor: { type: Number, min: 0, default: null },
     stripeCheckoutSessionId: { type: String, default: null },
     stripePaymentIntentId: { type: String, default: null },
+    // WordPress room-booking reference (e.g. "BNY-LDNMJ4"). When set, the row is a read-only
+    // cache of a WordPress booking (services/wpRoomBooking.service.js); WordPress is the source of truth.
+    externalRef: { type: String, default: undefined },
     // Google Calendar event mirrored from/to this booking (unique when set).
     googleEventId: { type: String, default: undefined },
     // Day passes: date-only booking with a quantity.
@@ -74,4 +77,8 @@ schema.index({ workspaceId: 1, contactId: 1, startAt: -1 });
 schema.index({ googleEventId: 1 }, { unique: true, partialFilterExpression: { googleEventId: { $type: "string" } } });
 schema.index({ stripeCheckoutSessionId: 1 }, { partialFilterExpression: { stripeCheckoutSessionId: { $type: "string" } } });
 schema.index({ workspaceId: 1, companyId: 1, startAt: -1 });
+schema.index(
+  { workspaceId: 1, externalRef: 1 },
+  { unique: true, partialFilterExpression: { externalRef: { $type: "string" } } },
+);
 export const Booking = mongoose.model("Booking", schema);

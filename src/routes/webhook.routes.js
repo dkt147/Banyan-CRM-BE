@@ -5,6 +5,7 @@ import {
   receiveWhatsAppWebhookAndSync,
   verifyWhatsAppWebhookAndRespond,
 } from "../controllers/whatsappIntegration.controller.js";
+import { receiveWpBookingWebhook } from "../controllers/wpRoomBookingWebhook.controller.js";
 
 const r = Router();
 
@@ -12,6 +13,8 @@ const r = Router();
 r.post("/stripe", receiveStripeWebhook);
 r.get("/whatsapp", verifyWhatsAppWebhookAndRespond);
 r.post("/whatsapp", receiveWhatsAppWebhookAndSync);
+// WordPress room bookings (booking.paid / booking.cancelled), HMAC-signed with BANYAN_CRM_TOKEN.
+r.post("/banyan-bookings", receiveWpBookingWebhook);
 
 // Preserve existing generic provider webhook behavior for other providers.
 r.post("/:provider", receive);
