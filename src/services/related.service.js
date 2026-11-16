@@ -6,6 +6,7 @@ import { Contact } from "../models/Contact.js";
 import { Conversation } from "../models/Conversation.js";
 import { Deal } from "../models/Deal.js";
 import { Document } from "../models/Document.js";
+import { Pipeline } from "../models/Pipeline.js";
 import { Task } from "../models/Task.js";
 import { AppError } from "../utils/AppError.js";
 import { displayStatus } from "./booking.service.js";
@@ -89,6 +90,46 @@ async function buildScope(type, workspaceId, entity) {
   }
   const none = { ...ws, _id: null };
   return { bookings: none, deals: none, tasks: none, conversations: none, files: none, activities: none };
+}
+
+/*
+ * Purchases (feedback 17 Nov, #1): transactional deals (day passes, room/venue hire …) are shown
+ * with the contact's/company's bookings, so "every product purchased" is in one place.
+ */
+export const PURCHASE_PRODUCT_TYPES = [
+  "day_pass", "day_pass_package", "transactional", "meeting_room", "venue_hire",
+  "studio", "event_space", "photoshoot", "podcast",
+];
+const PRODUCT_LABELS = {
+  day_pass: "Day pass", day_pass_package: "Day pass package", transactional: "Purchase", meeting_room: "Meeting room",
+  venue_hire: "Venue hire", studio: "Studio", event_space: "Event space", photoshoot: "Photoshoot", podcast: "Podcast studio",
+};
+const money = (value, currency = "HKD") =>
+  `${currency === "HKD" ? "HK$" : `${currency} `}${Number(value || 0).toLocaleString("en-HK", { maximumFractionDigits: 2 })}`;
+
+async function purchaseSection(workspaceId, dealScope, limit) {
+  const transactionalPipelines = await Pipeline.find({ workspaceId, key: "transactional" }).distinct("_id");
+  const filter = {
+    $and: [
+      dealScope,
+      { $or: [{ productType: { $in: PURCHASE_PRODUCT_TYPES } }, { pipelineId: { $in: transactionalPipelines } }] },
+    ],
+  };
+  return section(Deal, filter, {
+    limit,
+    sort: { updatedAt: -1 },
+    select: "title value currency status productType closedAt updatedAt contactId",
+    map: (d) => ({
+      id: `deal-${d._id}`,
+      kind: "purchase",
+      dealId: String(d._id),
+      title: d.title,
+      subtitle: [PRODUCT_LABELS[d.productType] || "Purchase", money(d.value, d.currency), d.status === "won" ? "Won" : d.status === "lost" ? "Lost" : "Open"].join(" · "),
+      status: d.status === "won" ? "purchased" : d.status,
+      date: d.closedAt || d.updatedAt,
+      contactId: str(idOf(d.contactId)),
+    }),
+  });
 }
 
 async function section(Model, filter, { sort, select, populate = [], limit, map }) {
@@ -204,6 +245,16 @@ export async function getRelatedRecords({ type, id, workspaceId, userId, limit =
       }),
     }),
   ]);
+
+  // Contacts and companies: merge purchases into "Bookings & purchases", newest first.
+  if (type === "contact" || type === "company") {
+    const purchases = await purchaseSection(workspaceId, scope.deals, size);
+    bookings.items = [...bookings.items.map((b) => ({ kind: "booking", ...b })), ...purchases.items]
+      .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0))
+      .slice(0, size);
+    bookings.total += purchases.total;
+    bookings.purchasesTotal = purchases.total;
+  }
 
   // Links: the records this entity points to.
   let links = { contact: null, company: null, deal: null };

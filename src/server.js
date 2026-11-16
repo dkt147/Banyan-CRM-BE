@@ -5,7 +5,8 @@ import { runMembershipRenewalJobs } from "./services/membershipRenewalJobs.servi
 import { pollGoogleCalendars } from "./services/googleCalendarPoller.service.js";
 import { pollGmailInboxes } from "./services/gmailPoller.service.js";
 import { runScheduledAutomations } from "./services/automation.service.js";
-import { runWpBookingSyncJob } from "./services/wpRoomBooking.service.js";
+import { getWpBookingContext, runWpBookingSyncJob } from "./services/wpRoomBooking.service.js";
+import { runPartnerBlocksJob } from "./services/partnerBlocks.service.js";
 await connectDatabase();
 app.listen(env.PORT, () => {
   console.log(`Banyan API listening on ${env.PORT}`);
@@ -26,4 +27,10 @@ app.listen(env.PORT, () => {
     setTimeout(() => runWpBookingSyncJob(), 20_000);
     setInterval(() => runWpBookingSyncJob(), env.BANYAN_BOOKING_SYNC_MINUTES * 60 * 1000).unref();
   }
+  // Partner room-calendar events → WordPress blocks. Does nothing unless switched on in the room
+  // calendar settings and WordPress has POST /blocks (docs/WP_PARTNER_BLOCKS_SPEC.md).
+  const partnerBlocks = () =>
+    getWpBookingContext().then(({ workspaceId }) => runPartnerBlocksJob(workspaceId)).catch(() => {});
+  setTimeout(partnerBlocks, 90_000);
+  setInterval(partnerBlocks, 10 * 60 * 1000).unref();
 });

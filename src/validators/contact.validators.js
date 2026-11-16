@@ -2,15 +2,24 @@ import { z } from "zod";
 
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid ID");
 
-  const contactTags = [
-    "prospect",
-    "active_member",
-    "past_member",
-    "event_client",
-    "broker_agent",
-    "ngo",
-    "vip",
-  ];
+import { MAX_TAGS_PER_CONTACT, TAG_PATTERN, normalizeTag, normalizeTags } from "../utils/contactTags.js";
+
+// Tags: catalogue keys or custom snake_case keys. Input is normalised first ("Active Member" ->
+// "active_member"), then validated, so the stored list is always clean.
+const tagsSchema = z.preprocess(
+  (value) => (Array.isArray(value) ? normalizeTags(value) : value),
+  z
+    .array(z.string().regex(TAG_PATTERN, "Tags must be lowercase letters, numbers and underscores (max 50)."))
+    .max(MAX_TAGS_PER_CONTACT, `A contact can have at most ${MAX_TAGS_PER_CONTACT} tags.`),
+);
+// List filter: "a,b" means the contact has all of them.
+const tagFilterSchema = z
+  .string()
+  .trim()
+  .max(500)
+  .transform((value) => normalizeTags(value.split(",")))
+  .refine((tags) => tags.length > 0 && tags.length <= 10 && tags.every((t) => TAG_PATTERN.test(t)), "Invalid tag filter.");
+export { normalizeTag };
 
 export const createContactSchema = z.object({
   firstName: z.string().trim().min(1, "First name is required").max(100),
@@ -27,7 +36,7 @@ export const createContactSchema = z.object({
 
   companyId: objectId.nullable().optional(),
 
-  tags: z.array(z.enum(contactTags)).max(20).optional(),
+  tags: tagsSchema.optional(),
 
   source: z.string().trim().max(100).nullable().optional(),
 
@@ -60,7 +69,7 @@ export const contactListQuerySchema = z.object({
 
   ownerId: objectId.optional(),
 
-  tag: z.enum(contactTags).optional(),
+  tag: tagFilterSchema.optional(),
 
   isArchived: z
     // "all" returns active and archived records.

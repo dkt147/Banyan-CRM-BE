@@ -88,7 +88,7 @@ const SERVICE_ROUTING = {
   },
 };
 
-function endOfDayInTimeZone(date, timeZone = "Asia/Hong_Kong") {
+export function endOfDayInTimeZone(date, timeZone = "Asia/Hong_Kong") {
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat("en-CA", {
       timeZone,
@@ -185,7 +185,7 @@ function resolveServices(input) {
   return services;
 }
 
-async function getIntakeContext() {
+export async function getIntakeContext() {
   let workspace = null;
   if (env.PUBLIC_ENQUIRY_WORKSPACE_ID) {
     if (!/^[0-9a-fA-F]{24}$/.test(env.PUBLIC_ENQUIRY_WORKSPACE_ID)) {

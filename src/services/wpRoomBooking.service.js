@@ -21,6 +21,7 @@ import { Workspace } from "../models/Workspace.js";
 import { AppError } from "../utils/AppError.js";
 import { HK_TZ } from "../utils/hkTime.js";
 import { findOrCreateContact } from "./contactMatching.service.js";
+import { queueRoomCalendarSync } from "./roomCalendar.service.js";
 
 /* ---------- business rules (spec §3; no config endpoint exists in WordPress) ---------- */
 export const WP_ROOMS = [
@@ -267,7 +268,7 @@ export async function upsertWpBooking(payload, { origin = "snapshot", event = nu
       // Contacts that exist only because of a Stripe test-mode booking are tagged so they can be
       // filtered out or cleaned up. Existing (real) contacts are never tagged.
       if (contactCreated && mapped.wp.payment?.mode === "test") {
-        contact.tags = [...new Set([...(contact.tags || []), "test-booking"])];
+        contact.tags = [...new Set([...(contact.tags || []), "test_booking"])];
         await contact.save();
       }
     } catch (error) {
@@ -307,6 +308,8 @@ export async function upsertWpBooking(payload, { origin = "snapshot", event = nu
       metadata: { bookingId: String(booking._id), wpRef: mapped.ref, wpStatus: mapped.wpStatus, paymentMode: mapped.wp.payment?.mode || null },
     });
 
+  // Mirror into the shared Google room calendar in the background (never blocks the webhook).
+  if (changed) queueRoomCalendarSync(booking._id);
   return { booking, created, changed, skipped: null };
 }
 
@@ -527,6 +530,8 @@ export function toRoomBookingRow(b, now = new Date()) {
       : null,
     createdAt: wp.createdAt,
     syncedAt: wp.lastSyncedAt || b.updatedAt,
+    // Copy in the shared Google room calendar: { calendarId, eventId, action, syncedAt, error, reason }.
+    googleCalendar: b.metadata?.roomCalendar || null,
   };
 }
 

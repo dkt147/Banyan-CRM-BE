@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import { Contact } from "../models/Contact.js";
 import { Company } from "../models/Company.js";
 import { Deal } from "../models/Deal.js";
@@ -82,8 +83,10 @@ export async function getContacts({
     filter.companyId = companyId;
   }
 
-  if (tag) {
-    filter.tags = tag;
+  // One tag or several ("a,b" from the validator arrives as an array): contact must have all.
+  const tagList = Array.isArray(tag) ? tag : tag ? [tag] : [];
+  if (tagList.length) {
+    filter.tags = { $all: tagList };
   }
 
   const searchFilter = await contactSearchFilter(workspaceId, search);
@@ -109,6 +112,18 @@ export async function getContacts({
       totalPages: Math.ceil(total / limit),
     },
   };
+}
+
+/** Distinct tags used in the workspace, most used first: [{ key, count }]. */
+export async function getContactTagCounts(workspaceId) {
+  const rows = await Contact.aggregate([
+    { $match: { workspaceId: new mongoose.Types.ObjectId(String(workspaceId)), isArchived: { $ne: true } } },
+    { $unwind: "$tags" },
+    { $group: { _id: "$tags", count: { $sum: 1 } } },
+    { $sort: { count: -1, _id: 1 } },
+    { $limit: 500 },
+  ]);
+  return rows.filter((r) => r._id).map((r) => ({ key: r._id, count: r.count }));
 }
 
 /** Search filter including company-name matches, scoped to the workspace. */

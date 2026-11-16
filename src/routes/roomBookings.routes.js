@@ -25,6 +25,14 @@ import {
   syncWpRange,
   toRoomBookingRow,
 } from "../services/wpRoomBooking.service.js";
+import {
+  backfillPreview,
+  getRoomCalendarSettings,
+  roomCalendarStatus,
+  saveRoomCalendarSettings,
+  syncBookingToRoomCalendar,
+} from "../services/roomCalendar.service.js";
+import { partnerBlockStatus, syncPartnerBlocks } from "../services/partnerBlocks.service.js";
 
 const r = Router();
 r.use(requireAuth);
@@ -51,6 +59,8 @@ r.get(
         // { at, mode, created, updated, failed, error } or null before the first run.
         lastSync: await getWpLastSync(req.workspaceId),
         syncIntervalMinutes: env.BANYAN_BOOKING_SYNC_MINUTES,
+        // Room → Google Calendar ID ({ small, medium, library }); the calendar UI treats these as read-only.
+        googleCalendars: (await getRoomCalendarSettings(req.workspaceId)).calendars,
       },
     });
   }),
@@ -152,6 +162,66 @@ r.post(
       return res.json({ success: true, data: { mode: "range", ...(await syncWpRange(from, to)) } });
     }
     res.json({ success: true, data: await syncWpIncremental() });
+  }),
+);
+
+/* ---------- Google Calendar for room bookings (feedback 17 Nov, #7) ---------- */
+r.get(
+  "/google-calendars",
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await roomCalendarStatus(req.workspaceId) });
+  }),
+);
+
+// Body: { calendars: { small, medium, library }, includePending, showPartnerEvents, partnerBlocks: { enabled } }.
+// Checks the connected Google account can write to each calendar; pushes start from now (no backfill).
+r.put(
+  "/google-calendars",
+  requirePermission("workspace.manage"),
+  asyncHandler(async (req, res) => {
+    const { warnings } = await saveRoomCalendarSettings(req.workspaceId, req.body || {}, req.user._id);
+    res.json({ success: true, data: { ...(await roomCalendarStatus(req.workspaceId)), warnings } });
+  }),
+);
+
+// Dry run only: upcoming bookings that are not in Google Calendar because they predate the setting.
+r.get(
+  "/google-calendars/backfill-preview",
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await backfillPreview(req.workspaceId) });
+  }),
+);
+
+// Re-run the Google Calendar push for one booking (e.g. after fixing calendar access).
+r.post(
+  "/:ref/google-calendar-sync",
+  requirePermission("bookings.write"),
+  asyncHandler(async (req, res) => {
+    const b = await Booking.findOne({ workspaceId: req.workspaceId, externalRef: String(req.params.ref).toUpperCase() }).select("_id");
+    if (!b) throw new AppError("Booking not found.", 404, "NOT_FOUND");
+    res.json({ success: true, data: await syncBookingToRoomCalendar(b._id) });
+  }),
+);
+
+/* ---------- partner calendar events → WordPress blocks (option 3) ---------- */
+r.get(
+  "/partner-blocks",
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await partnerBlockStatus(req.workspaceId) });
+  }),
+);
+// Dry run: what would be blocked in WordPress, and which partner events clash with bookings.
+r.get(
+  "/partner-blocks/preview",
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await syncPartnerBlocks(req.workspaceId, { dryRun: true }) });
+  }),
+);
+r.post(
+  "/partner-blocks/sync",
+  requirePermission("workspace.manage"),
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await syncPartnerBlocks(req.workspaceId, { dryRun: false }) });
   }),
 );
 

@@ -58,6 +58,8 @@ const schema = new mongoose.Schema(
     lastActivityAt: Date,
     nextActionAt: Date,
     stageChangedAt: Date,
+    // When the deal was won or lost (null while open). Maintained by the hooks below; used by reports.
+    closedAt: { type: Date, default: null },
     metadata: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true },
@@ -73,6 +75,37 @@ schema.pre("validate", async function assignDealNumber() {
   // Start readable IDs at 3333 while keeping them unique within each workspace.
   this.dealNumber = 3332 + sequence.value;
 });
+// closedAt: set when status becomes won/lost, cleared when reopened.
+const CLOSED = ["won", "lost"];
+schema.pre("save", function setClosedAt() {
+  if (this.isNew) {
+    if (CLOSED.includes(this.status) && !this.closedAt) this.closedAt = new Date();
+    return;
+  }
+  if (this.isModified("status")) this.closedAt = CLOSED.includes(this.status) ? new Date() : null;
+});
+// Query updates (updateOne/updateMany/findOneAndUpdate) that set status: fix closedAt on the
+// matched deals afterwards, only where it is missing or stale, so repeating "won" keeps the date.
+function statusFromUpdate(update = {}) {
+  return update.$set?.status ?? update.status;
+}
+function rememberStatusUpdate() {
+  const status = statusFromUpdate(this.getUpdate());
+  this._closedAtSync = status ? { status, filter: this.getFilter() } : null;
+}
+async function syncClosedAt() {
+  const sync = this._closedAtSync;
+  if (!sync) return;
+  const Model = this.model;
+  if (CLOSED.includes(sync.status))
+    await Model.updateMany({ ...sync.filter, status: sync.status, closedAt: null }, { $set: { closedAt: new Date() } });
+  else await Model.updateMany({ ...sync.filter, status: "open", closedAt: { $ne: null } }, { $set: { closedAt: null } });
+}
+for (const op of ["updateOne", "updateMany", "findOneAndUpdate"]) {
+  schema.pre(op, rememberStatusUpdate);
+  schema.post(op, syncClosedAt);
+}
 schema.index({ workspaceId: 1, pipelineId: 1, stageId: 1, status: 1 });
+schema.index({ workspaceId: 1, status: 1, closedAt: 1 });
 schema.index({ title: "text", source: "text" });
 export const Deal = mongoose.model("Deal", schema);

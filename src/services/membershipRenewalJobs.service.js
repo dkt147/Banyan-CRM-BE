@@ -7,25 +7,36 @@ import { Contact } from "../models/Contact.js";
 import { User } from "../models/User.js";
 import { Task } from "../models/Task.js";
 import { Integration } from "../models/Integration.js";
-import { getProviderAccessToken, providerJson } from "./providerApi.service.js";
+import { Template } from "../models/Template.js";
+import { looksLikeHtml } from "../utils/mail.js";
+import { sendWorkspaceEmail } from "./mail.service.js";
+import { renderString, templateValues } from "./template.service.js";
 
 let running = false;
 const DAY = 86400000;
 function dayKey(date) { return new Date(date).toISOString().slice(0, 10); }
-function encodeMail(to, subject, body) {
-  const safe = (v) => String(v || "").replace(/[\r\n]/g, " ");
-  const raw = [`To: ${safe(to)}`, `Subject: ${safe(subject)}`, "MIME-Version: 1.0", "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64", "", Buffer.from(body, "utf8").toString("base64")].join("\r\n");
-  return Buffer.from(raw, "utf8").toString("base64url");
-}
-async function sendRenewalEmail(workspaceId, to, name, days, endDate) {
-  const integration = await Integration.findOne({ workspaceId, provider: "gmail", status: "connected" }).lean();
-  if (!integration) return false;
-  const token = await getProviderAccessToken(workspaceId, "gmail");
-  await providerJson("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
-    method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "application/json" },
-    body: JSON.stringify({ raw: encodeMail(to, "Banyan Virtual Office agreement renewal", `Dear ${name || "customer"},\n\nThis is a reminder that your Banyan Virtual Office agreement is due to end on ${new Date(endDate).toLocaleDateString("en-GB", { timeZone: "Asia/Hong_Kong" })}. Please contact the Banyan team to discuss renewal.\n\nKind regards,\nBanyan Workspace`) }),
-  }, "Gmail renewal reminder");
-  return true;
+// An active template with category "renewal_reminder" replaces the built-in text. Its
+// {{variables}} are filled from the contact; {{endDate}} and {{daysLeft}} are also available.
+async function sendRenewalEmail(workspaceId, contact, days, endDate) {
+  const endLabel = new Date(endDate).toLocaleDateString("en-GB", { timeZone: "Asia/Hong_Kong", weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  const template = await Template.findOne({ workspaceId, category: "renewal_reminder", isActive: { $ne: false } }).sort({ updatedAt: -1 }).lean();
+  if (template) {
+    const values = { ...templateValues({ contact }), endDate: endLabel, daysLeft: String(days) };
+    const isHtml = looksLikeHtml(template.body);
+    return sendWorkspaceEmail(workspaceId, {
+      to: contact.email,
+      subject: renderString(template.subject, values).replace(/[\r\n]+/g, " "),
+      ...(isHtml ? { html: renderString(template.body, values, { html: true }) } : { text: renderString(template.body, values) }),
+      label: "Gmail renewal reminder",
+    });
+  }
+  const name = `${contact.firstName || ""} ${contact.lastName || ""}`.trim();
+  return sendWorkspaceEmail(workspaceId, {
+    to: contact.email,
+    subject: "Banyan Virtual Office agreement renewal",
+    text: `Dear ${name || "customer"},\n\nThis is a reminder that your Banyan Virtual Office agreement is due to end on ${endLabel}. Please contact the Banyan team to discuss renewal.\n\nKind regards,\nBanyan Workspace`,
+    label: "Gmail renewal reminder",
+  });
 }
 
 export async function runMembershipRenewalJobs() {
@@ -50,7 +61,7 @@ export async function runMembershipRenewalJobs() {
       if (isVirtualOffice) {
         if (!contact.email) continue;
         try {
-          const sent = await sendRenewalEmail(membership.workspaceId, contact.email, `${contact.firstName || ""} ${contact.lastName || ""}`.trim(), days, expiry);
+          const sent = await sendRenewalEmail(membership.workspaceId, contact, days, expiry);
           if (!sent) continue; // Gmail must be connected before direct customer emails can be sent.
         } catch (error) { console.error("[membership-renewal] email failed:", error.message); continue; }
       } else {
@@ -81,7 +92,7 @@ export async function runMembershipRenewalJobs() {
         const contact = deal.contactId;
         if (!contact?.email) continue;
         try {
-          const sent = await sendRenewalEmail(deal.workspaceId, contact.email, `${contact.firstName || ""} ${contact.lastName || ""}`.trim(), days, expiry);
+          const sent = await sendRenewalEmail(deal.workspaceId, contact, days, expiry);
           if (!sent) continue;
           deal.metadata = { ...(deal.metadata?.toObject ? deal.metadata.toObject() : deal.metadata || {}), virtualOfficeRenewalReminderSent: { ...(deal.metadata?.virtualOfficeRenewalReminderSent || {}), [String(days)]: now } };
           await deal.save();

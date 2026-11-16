@@ -12,6 +12,7 @@ import {
 } from "../controllers/calendar.controller.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { assertNotWpManaged, rejectWpRoomForCrmBooking } from "../services/wpRoomBooking.service.js";
+import { rejectRoomCalendarEventWrite } from "../middleware/roomCalendarGuard.middleware.js";
 
 const r = Router();
 r.use(requireAuth);
@@ -31,6 +32,10 @@ const notWpManaged = asyncHandler(async (req, _res, next) => {
 r.patch("/:id/confirm", notWpManaged, confirm);
 r.patch("/:id/cancel", notWpManaged, cancel);
 
+// Events from shared room calendars are read-only (same guard as /calendar-events).
+r.patch("/:id", rejectRoomCalendarEventWrite);
+r.put("/:id", rejectRoomCalendarEventWrite);
+r.delete("/:id", rejectRoomCalendarEventWrite);
 // Standard CalendarEvent CRUD remains available under /calendar.
 r.use(resourceRouter(resourceRegistry.calendar.service));
 

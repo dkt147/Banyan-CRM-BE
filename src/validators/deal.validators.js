@@ -4,17 +4,23 @@ const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid ID");
 
 const dealStatus = z.enum(["open", "won", "lost"]);
 
-const productTypes = z.enum([
+// Keep in sync with services/related.service.js PURCHASE_PRODUCT_TYPES and publicEnquiry SERVICE_ROUTING.
+export const PRODUCT_TYPES = [
   "membership",
   "private_office",
   "venue_hire",
   "transactional",
   "meeting_room",
   "day_pass",
+  "day_pass_package",
   "virtual_office",
   "studio",
+  "event_space",
+  "photoshoot",
+  "podcast",
   "other",
-]);
+];
+const productTypes = z.enum(PRODUCT_TYPES);
 
 export const createDealSchema = z.object({
   title: z.string().trim().min(2, "Deal title is required").max(200),

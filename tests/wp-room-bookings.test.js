@@ -157,7 +157,7 @@ test("webhook: rejects bad signature, upserts by ref, links contact; test-mode a
   const contact = await models.Contact.findById(b.contactId);
   assert.equal(contact.email, "test.booking@banyanworkspace.com");
   assert.ok(await models.Resource.exists({ name: "Meeting Room (14 people)" }));
-  assert.ok(contact.tags.includes("test-booking"), "contacts created by Stripe test bookings are tagged");
+  assert.ok(contact.tags.includes("test_booking"), "contacts created by Stripe test bookings are tagged");
   assert.equal(await models.Activity.countDocuments({ "metadata.wpRef": "BNY-LDNMJ4" }), 0);
 
   // A late "pending" push must not downgrade a paid booking.
@@ -184,7 +184,7 @@ test("webhook: live-mode bookings add one timeline entry per transition; existin
   await push(live("paid"));
   const b = await models.Booking.findOne({ externalRef: "BNY-LIVE01" });
   assert.equal(String(b.contactId), String(real._id));
-  assert.ok(!(await models.Contact.findById(real._id)).tags.includes("test-booking"));
+  assert.ok(!(await models.Contact.findById(real._id)).tags.includes("test_booking"));
   assert.equal(await models.Activity.countDocuments({ "metadata.wpRef": "BNY-LIVE01" }), 1);
   await push({ ...live("cancelled"), event: "booking.cancelled" });
   assert.equal(await models.Activity.countDocuments({ "metadata.wpRef": "BNY-LIVE01" }), 2);

@@ -17,6 +17,9 @@ import {
   getProviderAccessToken,
   providerJson,
 } from "../services/providerApi.service.js";
+import { buildMime, htmlToText, looksLikeHtml, MAX_EMAIL_BODY_BYTES } from "../utils/mail.js";
+import { getTemplate, loadTemplateContext, renderString, renderTemplate, templateValues } from "../services/template.service.js";
+import { assertCalendarEventWritable, assertSyncCalendarWritable, importRulesFor } from "../services/roomCalendar.service.js";
 
 function gmailHeader(value, name) {
   const normalized = String(value || "").trim();
@@ -56,11 +59,31 @@ async function googleRequest(workspaceId, provider, url, options = {}) {
 
 export const sendGmailMessage = asyncHandler(async (req, res) => {
   const to = gmailHeader(req.body?.to, "to");
-  const subjectText = String(req.body?.subject || "").trim();
-  const subject = encodeSubject(subjectText);
-  const bodyText = String(req.body?.text || req.body?.body || "");
-  if (!bodyText.trim())
+  // Optional template: { templateId, contactId?, companyId?, dealId?, bookingId? } fills {{variables}}.
+  // Explicit subject/text/html in the request override the template's.
+  let subjectText = String(req.body?.subject || "").trim();
+  let bodyText = String(req.body?.text || req.body?.body || "");
+  let bodyHtml = String(req.body?.html || "");
+  const ctx = await loadTemplateContext(req.workspaceId, req.body || {}, req.user);
+  if (req.body?.templateId) {
+    const rendered = renderTemplate(await getTemplate(req.workspaceId, req.body.templateId), ctx);
+    if (!subjectText) subjectText = rendered.subject;
+    if (!bodyText.trim() && !bodyHtml.trim()) {
+      if (rendered.isHtml) bodyHtml = rendered.body;
+      else bodyText = rendered.body;
+    }
+  }
+  // Variables typed directly into the composer are filled in too.
+  const values = templateValues(ctx);
+  subjectText = renderString(subjectText, values).replace(/[\r\n]+/g, " ");
+  if (bodyHtml.trim()) bodyHtml = renderString(bodyHtml, values, { html: true });
+  else if (looksLikeHtml(bodyText)) { bodyHtml = renderString(bodyText, values, { html: true }); bodyText = ""; }
+  else bodyText = renderString(bodyText, values);
+  if (!bodyText.trim() && !bodyHtml.trim())
     throw new AppError("text is required.", 400, "EMAIL_BODY_REQUIRED");
+  if (Buffer.byteLength(bodyText + bodyHtml, "utf8") > MAX_EMAIL_BODY_BYTES)
+    throw new AppError("The email body is larger than 500 KB.", 413, "EMAIL_BODY_TOO_LARGE");
+  encodeSubject(subjectText); // rejects line breaks in the subject
   const cc = req.body?.cc ? gmailHeader(req.body.cc, "cc") : "";
   const bcc = req.body?.bcc ? gmailHeader(req.body.bcc, "bcc") : "";
   const integration = await getConnectedIntegration(req.workspaceId, "gmail");
@@ -103,19 +126,15 @@ export const sendGmailMessage = asyncHandler(async (req, res) => {
     }
   }
 
-  const mime = [
-    `To: ${to}`,
-    ...(cc ? [`Cc: ${cc}`] : []),
-    ...(bcc ? [`Bcc: ${bcc}`] : []),
-    ...(from ? [`From: ${gmailHeader(from, "from")}`] : []),
-    ...replyHeaders,
-    `Subject: ${subject}`,
-    "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=UTF-8",
-    "Content-Transfer-Encoding: base64",
-    "",
-    Buffer.from(bodyText, "utf8").toString("base64"),
-  ].join("\r\n");
+  // HTML bodies go out as multipart/alternative (text version + HTML).
+  const mime = buildMime({
+    to, cc, bcc,
+    from: from ? gmailHeader(from, "from") : undefined,
+    headers: replyHeaders,
+    subject: subjectText,
+    text: bodyText,
+    html: bodyHtml || undefined,
+  });
 
   const sendBody = { raw: Buffer.from(mime, "utf8").toString("base64url") };
   // Gmail threading requires the thread ID plus compatible reply headers.
@@ -168,7 +187,7 @@ export const sendGmailMessage = asyncHandler(async (req, res) => {
     direction: "outbound",
     senderName: req.user?.name || from || "Banyan user",
     senderAddress: from || req.user?.email || "",
-    body: bodyText,
+    body: bodyText || htmlToText(bodyHtml),
     sentAt,
     status: "sent",
     metadata: {
@@ -550,13 +569,16 @@ export const syncGoogleCalendarEvents = asyncHandler(async (req, res) => {
     maxResults: Math.min(Math.max(Number(req.body?.maxResults || req.query.maxResults) || 250, 1), 2500),
   });
   const result = await googleRequest(req.workspaceId, "google_calendar", url);
-  const externalEvents = result.items || [];
+  // Room calendars: our own booking events are skipped (shown as bookings); partner events are read-only.
+  const rules = await importRulesFor(req.workspaceId, calendarId);
+  const externalEvents = rules.skipCalendar ? [] : result.items || [];
   let created = 0;
   let updated = 0;
   let skipped = 0;
 
   for (const external of externalEvents) {
     if (!external.id) { skipped += 1; continue; }
+    if (rules.skipEvent(external)) { skipped += 1; continue; }
     const existing = await CalendarEvent.findOne({
       workspaceId: req.workspaceId,
       externalProvider: "google_calendar",
@@ -599,6 +621,7 @@ export const syncGoogleCalendarEvents = asyncHandler(async (req, res) => {
       externalEventId: external.id,
       metadata: {
         googleCalendarId: calendarId,
+        ...(rules.readOnly ? { readOnly: true } : {}),
         googleEventHtmlLink: external.htmlLink || "",
         googleEventStatus: external.status || "confirmed",
         googleUpdatedAt: external.updated || null,
@@ -639,6 +662,9 @@ export const syncGoogleCalendarEvent = asyncHandler(async (req, res) => {
   });
   if (!event) throw new AppError("Calendar event not found.", 404, "NOT_FOUND");
   const calendarId = env.GOOGLE_CALENDAR_ID || "primary";
+  // Shared room calendars (partner calendars) are never written by the general sync.
+  await assertSyncCalendarWritable(req.workspaceId, calendarId);
+  await assertCalendarEventWritable(req.workspaceId, event);
   const externalId =
     event.externalProvider === "google_calendar" ? event.externalEventId : null;
 

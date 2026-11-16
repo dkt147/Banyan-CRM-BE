@@ -8,8 +8,10 @@ const schema = new mongoose.Schema(
       index: true,
     },
     name: { type: String, required: true, trim: true },
-    subject: { type: String, required: true },
-    body: { type: String, required: true },
+    subject: { type: String, required: true, maxlength: 998 },
+    // Plain text or HTML (imported from Brevo/Mailchimp/Canva). Stored and sent as given; {{variables}}
+    // are filled in at send time (services/template.service.js). About 500 KB maximum.
+    body: { type: String, required: true, maxlength: 512000 },
     category: String,
     variables: [String],
     triggerStage: String,
