@@ -141,6 +141,9 @@ export function mapWpPayload(payload) {
       updatedAt: b.updated_at || null,
       // Set on blocks the CRM created from partner calendar events ("gcal:<eventId>:<date>"), plugin 1.1.1+.
       externalId: b.external_id || null,
+      cancelReason: b.cancel_reason || null,
+      cancelledBy: b.cancelled_by || null,
+      cancelledAt: b.cancelled_at || null,
       customer: {
         firstName: customer.first_name || "",
         lastName: customer.last_name || "",
@@ -160,6 +163,16 @@ export function mapWpPayload(payload) {
             paidAt: payment.paid_at || null,
             stripeSessionId: payment.stripe_session_id || null,
             stripePaymentIntent: payment.stripe_payment_intent || null,
+            // Plugin 1.2.0: full refund made when cancelling, or null.
+            refund: payment.refund
+              ? {
+                  id: payment.refund.id || null,
+                  amount: payment.refund.amount ?? null,
+                  amountMinor: payment.refund.amount_minor ?? null,
+                  currency: String(payment.refund.currency || "HKD").toUpperCase(),
+                  status: payment.refund.status || null,
+                }
+              : null,
           },
     },
   };
@@ -216,6 +229,14 @@ async function ensureRoomResource(workspaceId, mapped) {
 }
 
 /* ---------- upsert ---------- */
+/** "Refunded HK$1,160" | "refund pending (HK$1,160)" | "no refund". */
+function refundNote(payment) {
+  const r = payment?.refund;
+  if (!r) return "no refund";
+  const amount = money(r.amount ?? (r.amountMinor != null ? r.amountMinor / 100 : 0));
+  return r.status === "succeeded" ? `Refunded ${amount}` : `refund ${r.status || "requested"} (${amount})`;
+}
+
 function activityFor(previousStatus, mapped) {
   const { wp } = mapped;
   // Stripe test-mode bookings never add to a contact's timeline (they may use a real client's email).
@@ -229,7 +250,7 @@ function activityFor(previousStatus, mapped) {
   if (wp.status === "cancelled" && previousStatus === "paid")
     return {
       subject: `Room booking cancelled ${wp.ref}`,
-      body: `${wp.roomName}, ${when}. Booking cancelled – refund handled in Stripe.`,
+      body: `${wp.roomName}, ${when}. Booking cancelled${wp.cancelledBy ? ` by ${wp.cancelledBy}` : ""}${wp.cancelReason ? ` (${wp.cancelReason})` : ""} – ${refundNote(wp.payment)}.`,
     };
   return null;
 }
@@ -617,6 +638,10 @@ export function toRoomBookingRow(b, now = new Date()) {
     payment: wp.payment
       ? { ...wp.payment, isTest: wp.payment.mode === "test", amountLabel: wp.payment.amount != null ? money(wp.payment.amount) : null, stripeUrl: stripePaymentUrl(wp.payment) }
       : null,
+    // Plugin 1.2.0: set when the booking was cancelled (WP Admin or the CRM).
+    cancelReason: wp.cancelReason || null,
+    cancelledBy: wp.cancelledBy || null,
+    cancelledAt: wp.cancelledAt || null,
     createdAt: wp.createdAt,
     syncedAt: wp.lastSyncedAt || b.updatedAt,
     // Copy in the shared Google room calendar: { calendarId, eventId, action, syncedAt, error, reason }.

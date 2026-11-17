@@ -33,11 +33,24 @@ const formRateLimiter = rateLimit({
 
 const wantsJson = (req) => req.is("application/json") || /application\/json/.test(req.get("accept") || "");
 
-/** Back to the page the form was on, with ?submitted=1 (or ?form_error=…), only on an allowed origin. */
+/**
+ * Back to the page the form was on, with ?submitted=1 (or ?form_error=…). Prefers the posted
+ * _return_url (on cross-site posts browsers send only the origin as Referer), then Referer;
+ * either must be on one of the form's allowed origins. _return_url is never stored: only the
+ * form's own fields are kept with a submission.
+ */
 function redirectBack(req, res, allowed, params) {
-  const referer = req.get("referer");
-  if (!referer || !allowed.has(normalizeOrigin(referer))) return false;
-  const url = new URL(referer);
+  const target = [req.body?._return_url, req.get("referer")].find((value) => {
+    if (typeof value !== "string" || value.length > 2000) return false;
+    try {
+      const u = new URL(value);
+      return /^https?:$/.test(u.protocol) && allowed.has(normalizeOrigin(value));
+    } catch {
+      return false;
+    }
+  });
+  if (!target) return false;
+  const url = new URL(target);
   for (const k of ["submitted", "form_error"]) url.searchParams.delete(k);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   res.redirect(303, url.toString());

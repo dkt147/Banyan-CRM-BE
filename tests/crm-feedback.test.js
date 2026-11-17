@@ -592,3 +592,25 @@ test("partner blocks applied: create, no loop back to Google, move, removed-by-h
   assert.deepEqual((await api("/room-bookings/partner-blocks")).json.data.blockConflicts.map((c) => c.date), [day]);
   assert.equal((await api("/room-bookings/partner-blocks")).json.data.supported, true);
 });
+
+test("public form HTML post: _return_url wins over an origin-only Referer, but only on allowed sites", { skip }, async () => {
+  const f = await api("/forms", { method: "POST", body: {
+    name: "Newsletter", slug: "newsletter", type: "newsletter",
+    fields: [{ key: "email", label: "Email", type: "email", mapTo: "email", required: true }],
+  } });
+  assert.equal(f.status, 201, JSON.stringify(f.json));
+  const post = (extra, referer = "https://banyanworkspace.com/") => api("/public/forms/newsletter", {
+    method: "POST", as: null,
+    raw: new URLSearchParams({ publicKey: f.json.data.publicKey, email: `n${Math.random()}@example.com`, ...extra }).toString(),
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: "https://banyanworkspace.com", Referer: referer },
+  });
+  const ok = await post({ _return_url: "https://banyanworkspace.com/meeting-rooms/?x=1" });
+  assert.equal(ok.status, 303);
+  assert.equal(ok.headers.get("location"), "https://banyanworkspace.com/meeting-rooms/?x=1&submitted=1");
+  const foreign = await post({ _return_url: "https://evil.example/phish" });
+  assert.equal(foreign.headers.get("location"), "https://banyanworkspace.com/?submitted=1", "falls back to Referer");
+  const bad = await post({ _return_url: "https://banyanworkspace.com/contact/", email: "not-an-email" });
+  assert.match(bad.headers.get("location"), /^https:\/\/banyanworkspace\.com\/contact\/\?form_error=/);
+  const sub = await M.FormSubmission.findOne({ formId: f.json.data._id, status: "processed" }).lean();
+  assert.equal(sub.payload.values._return_url, undefined, "_return_url is not stored");
+});

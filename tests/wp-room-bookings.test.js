@@ -270,3 +270,29 @@ test("CRM-only bookings and holds cannot use the WordPress rooms", { skip }, asy
   const move = await api(`/bookings/${ok.json.data._id}`, { method: "PATCH", body: { resourceName: "Meeting Room (5 to 6 people)" } });
   assert.equal(move.status, 409);
 });
+
+test("plugin 1.2.0: cancel reason, who, when and refund are kept and shown", { skip }, async () => {
+  const live = (status, extra = {}) =>
+    payload({
+      booking: { ref: "BNY-REFUND", status, ...extra.booking },
+      customer: { first_name: "Rae", last_name: "Fund", email: "rae@example.com" },
+      payment: { mode: "live", stripe_payment_intent: "pi_refund", ...extra.payment },
+    });
+  await push(live("paid"));
+  const cancelled = await push({
+    ...live("cancelled", {
+      booking: { cancel_reason: "Customer asked to move to next week", cancelled_by: "Felicia (CRM)", cancelled_at: "2026-11-18T03:00:00+00:00" },
+      payment: { refund: { id: "re_123", amount: 1160, amount_minor: 116000, currency: "hkd", status: "succeeded" } },
+    }),
+    event: "booking.cancelled",
+  });
+  assert.equal(cancelled.status, 200, JSON.stringify(cancelled.json));
+  const row = (await api("/room-bookings/BNY-REFUND")).json.data;
+  assert.equal(row.status, "cancelled");
+  assert.equal(row.cancelReason, "Customer asked to move to next week");
+  assert.equal(row.cancelledBy, "Felicia (CRM)");
+  assert.equal(row.cancelledAt, "2026-11-18T03:00:00+00:00");
+  assert.deepEqual(row.payment.refund, { id: "re_123", amount: 1160, amountMinor: 116000, currency: "HKD", status: "succeeded" });
+  const note = await models.Activity.findOne({ "metadata.wpRef": "BNY-REFUND", "metadata.wpStatus": "cancelled" });
+  assert.match(note.body, /cancelled by Felicia \(CRM\) \(Customer asked to move to next week\) – Refunded HK\$1,160\.$/);
+});
