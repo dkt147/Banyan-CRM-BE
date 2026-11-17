@@ -568,6 +568,9 @@ export function toRoomBookingRow(b, now = new Date()) {
     statusLabel: { paid: "Paid", pending: "Awaiting payment", blocked: "Blocked", cancelled: "Cancelled", expired: "Expired", error: "Error" }[status] || status,
     channel: wp.channel || null, // web | admin
     viaCrm: Boolean(wp.viaCrm),
+    // "gcal:<eventId>:<date>" on blocks made from partner calendar events; null otherwise.
+    externalId: wp.externalId || null,
+    partnerBlock: String(wp.externalId || "").startsWith("gcal:"),
     roomKey: wp.roomKey || null,
     roomName: wp.roomName || b.resourceName,
     resourceId: b.resourceId ? String(b.resourceId) : null,
