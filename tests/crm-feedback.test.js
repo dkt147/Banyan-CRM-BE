@@ -13,7 +13,9 @@ process.env.JWT_ACCESS_SECRET ||= "feedback-test-access-secret";
 process.env.JWT_REFRESH_SECRET ||= "feedback-test-refresh-secret";
 process.env.MONGODB_URI ||= process.env.TEST_MONGODB_URI || "mongodb://127.0.0.1:1/unused";
 process.env.INTEGRATION_TOKEN_ENCRYPTION_KEY = "a".repeat(64);
-process.env.BANYAN_CRM_TOKEN = "";
+process.env.BANYAN_CRM_TOKEN = "fb-wp-token";
+// Fake WordPress (see the fetch interceptor below); nothing reaches banyanworkspace.com.
+process.env.BANYAN_WP_API_URL = "https://wp.test/wp-json/banyan/v1/";
 process.env.BANYAN_BOOKING_SYNC_MINUTES = "0";
 process.env.PUBLIC_ENQUIRY_WORKSPACE_ID = "";
 process.env.PUBLIC_ENQUIRY_WORKSPACE_SLUG = "crm-feedback-test";
@@ -96,10 +98,49 @@ test("forms: submission validation", () => {
 /* ---------- fake Google (Calendar + Gmail) ---------- */
 const google = { calendars: new Map(), requests: [], sentMail: [], writable: new Set() };
 const realFetch = globalThis.fetch;
+
+/* ---------- fake WordPress plugin 1.1.1: /checkout, /bookings?ref=, /blocks ---------- */
+const wpFake = { bookings: new Map(), blocks: new Map(), checkouts: [], requests: [], clashRoomDates: new Set(), seq: 0 };
+async function fakeWordPress(url, init = {}) {
+  const method = (init.method || "GET").toUpperCase();
+  const body = init.body ? JSON.parse(init.body) : null;
+  const token = new Headers(init.headers).get("x-banyan-token");
+  wpFake.requests.push({ method, path: url.pathname, body, token });
+  const p = url.pathname.replace("/wp-json/banyan/v1/", "");
+  const out = (status, data) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
+  if (token !== "fb-wp-token") return out(401, { code: "rest_forbidden", message: "Sorry, you are not allowed to do that." });
+  if (p === "checkout" && method === "POST") {
+    const ref = `BNY-CK${String(++wpFake.seq).padStart(4, "0")}`;
+    const hh = (h) => String(h).padStart(2, "0");
+    wpFake.checkouts.push(body);
+    wpFake.bookings.set(ref, {
+      booking: { ref, status: "pending", channel: "web", room_key: body.room, room_name: "The Library", date: body.date, start_time: `${hh(body.start)}:00`, end_time: `${hh(body.start + body.hours)}:00`, hours: body.hours, start_iso: `${body.date}T${hh(body.start)}:00:00+08:00`, end_iso: `${body.date}T${hh(body.start + body.hours)}:00:00+08:00`, created_at: new Date().toISOString() },
+      customer: { first_name: body.first_name, last_name: body.last_name, email: body.email, phone: body.phone, notes: body.notes },
+      payment: { mode: "test", status: "pending" },
+    });
+    return out(200, { url: `https://checkout.stripe.com/c/pay/cs_test_${ref}#fid`, ref, session_id: `cs_test_${ref}` });
+  }
+  if (p === "bookings" && method === "GET") return out(200, { bookings: [wpFake.bookings.get(url.searchParams.get("ref"))].filter(Boolean) });
+  if (p === "blocks" && method === "POST") {
+    if (wpFake.clashRoomDates.has(`${body.room}|${body.date}`))
+      return out(409, { message: "Requested hours overlap customer booking BNY-PAID01. No block was created.", conflicts: ["BNY-PAID01"] });
+    const ref = `BNY-BL${String(++wpFake.seq).padStart(4, "0")}`;
+    wpFake.blocks.set(ref, body);
+    return out(201, { ref, status: "blocked", existing: false, ...body });
+  }
+  const del = p.match(/^blocks\/(.+)$/);
+  if (del && method === "DELETE") {
+    if (!wpFake.blocks.has(del[1])) return out(404, { message: `Booking ${del[1]} not found.` });
+    wpFake.blocks.delete(del[1]);
+    return out(200, { ok: true, ref: del[1] });
+  }
+  return out(404, { code: "rest_no_route", message: "No route was found matching the URL and request method." });
+}
 function cal(id) { if (!google.calendars.has(id)) google.calendars.set(id, new Map()); return google.calendars.get(id); }
 const json = (status, data) => new Response(status === 204 ? null : JSON.stringify(data ?? {}), { status, headers: { "Content-Type": "application/json" } });
 globalThis.fetch = async (input, init = {}) => {
   const url = new URL(typeof input === "string" ? input : input.url || String(input));
+  if (url.hostname === "wp.test") return fakeWordPress(url, init);
   if (url.hostname !== "www.googleapis.com" && url.hostname !== "gmail.googleapis.com") return realFetch(input, init);
   const method = (init.method || "GET").toUpperCase();
   const body = init.body ? JSON.parse(init.body) : null;
@@ -465,4 +506,89 @@ test("#7 partner blocks: dry-run lists blocks and clashes; applying needs the se
   assert.equal(off.status, 409);
   assert.equal(off.json.code, "PARTNER_BLOCKS_DISABLED");
   assert.ok(cal(LIB).has("partner2"), "partner events are only read");
+});
+
+/* ---------- plugin 1.1.1 follow-up ---------- */
+test("room calendar: blocks made from a partner's own event are never copied back", () => {
+  const settings = { saved: true, includePending: false, calendars: { library: DEFAULT_LIBRARY_CALENDAR }, pushFrom: { library: "2026-01-01T00:00:00Z" } };
+  const b = (externalId) => ({ endAt: new Date(Date.now() + 86400000), createdAt: new Date(), metadata: { wp: { status: "blocked", roomKey: "library", externalId, createdAt: new Date().toISOString() } } });
+  assert.equal(desiredCalendarState(b("gcal:abc:2026-12-01"), settings).reason, "partner_block");
+  assert.equal(desiredCalendarState(b(null), settings).present, true, "manual WP Admin blocks are still shown");
+});
+
+test("staff checkout via the CRM: token sent server-side, notes prefixed, pending row synced by ref", { skip }, async () => {
+  const day = new Date(Date.now() + 9 * 86400000).toISOString().slice(0, 10);
+  const r = await api("/room-bookings/checkout", { method: "POST", body: { room: "library", date: day, start: 10, hours: 2, first_name: "Pat", last_name: "Phone", email: "pat@example.com", phone: "+852 5555 1111", notes: "U-shape" } });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.match(r.json.data.ref, /^BNY-CK/);
+  assert.equal(r.json.data.session_id, `cs_test_${r.json.data.ref}`);
+  const sent = wpFake.checkouts.at(-1);
+  assert.equal(sent.notes, "Booked via CRM by Felicia – U-shape");
+  assert.equal(sent.website, "");
+  assert.equal(sent.return_url, "https://banyanworkspace.com/meeting-rooms-hong-kong/");
+  assert.equal(wpFake.requests.find((q) => q.path.endsWith("/checkout")).token, "fb-wp-token");
+  assert.equal((await api("/room-bookings/checkout", { method: "POST", as: "operator", body: {} })).status !== 403, true, "sales staff may book");
+
+  const synced = await api("/room-bookings/sync", { method: "POST", body: { ref: r.json.data.ref } });
+  assert.equal(synced.status, 200, JSON.stringify(synced.json));
+  assert.equal(synced.json.data.mode, "ref");
+  const row = await api(`/room-bookings/${r.json.data.ref}`);
+  assert.equal(row.json.data.status, "pending");
+  assert.equal(row.json.data.viaCrm, true);
+  assert.equal((await api("/room-bookings/sync", { method: "POST", body: { ref: "BNY-NOPE00" } })).status, 404);
+  assert.equal((await api("/room-bookings/sync", { method: "POST", body: { ref: "bad ref" } })).status, 400);
+});
+
+test("partner blocks applied: create, no loop back to Google, move, removed-by-hand, clash", { skip }, async () => {
+  const { upsertWpBooking } = await import("../src/services/wpRoomBooking.service.js");
+  const { syncBookingToRoomCalendar } = await import("../src/services/roomCalendar.service.js");
+  const LIB = DEFAULT_LIBRARY_CALENDAR;
+  const on = await api("/room-bookings/google-calendars", { method: "PUT", body: { partnerBlocks: { enabled: true } } });
+  assert.equal(on.status, 200, JSON.stringify(on.json));
+  assert.equal(on.json.data.partnerBlocks.enabled, true);
+
+  const event = cal(LIB).get("partner2");
+  const day = event.start.dateTime.slice(0, 10);
+  wpFake.blocks.clear();
+  const first = await api("/room-bookings/partner-blocks/sync", { method: "POST" });
+  assert.equal(first.status, 200, JSON.stringify(first.json));
+  assert.equal(wpFake.blocks.size, 1);
+  const [[blockRef, block]] = [...wpFake.blocks];
+  assert.deepEqual([block.room, block.date, block.start, block.hours, block.external_id], ["library", day, 14, 2, `gcal:partner2:${day}`]);
+
+  // The block comes back into the CRM (manual sync / webhook) — it must not be pushed to Google.
+  const before = cal(LIB).size;
+  const cached = await upsertWpBooking({
+    booking: { ref: blockRef, status: "blocked", channel: "admin", room_key: "library", room_name: "The Library", date: day, start_time: "14:00", end_time: "16:00", hours: 2, start_iso: `${day}T14:00:00+08:00`, end_iso: `${day}T16:00:00+08:00`, created_at: new Date().toISOString(), external_id: block.external_id },
+    customer: { first_name: "Blocked", notes: block.reason },
+  });
+  assert.deepEqual(await syncBookingToRoomCalendar(cached.booking._id), { skipped: "partner_block" });
+  assert.equal(cal(LIB).size, before);
+
+  // Unchanged → nothing sent again.
+  const posts = wpFake.requests.filter((q) => q.method === "POST" && q.path.endsWith("/blocks")).length;
+  await api("/room-bookings/partner-blocks/sync", { method: "POST" });
+  assert.equal(wpFake.requests.filter((q) => q.method === "POST" && q.path.endsWith("/blocks")).length, posts);
+
+  // Partner moves the meeting → old block deleted, new one created.
+  cal(LIB).set("partner2", { ...event, start: { dateTime: `${day}T16:00:00+08:00` }, end: { dateTime: `${day}T17:00:00+08:00` } });
+  await api("/room-bookings/partner-blocks/sync", { method: "POST" });
+  assert.ok(!wpFake.blocks.has(blockRef));
+  assert.deepEqual([...wpFake.blocks.values()].map((b) => [b.start, b.hours]), [[16, 1]]);
+
+  // Staff removed the block by hand in WP, then the partner deletes the meeting: plain 404 is fine.
+  wpFake.blocks.clear();
+  cal(LIB).delete("partner2");
+  const gone = await api("/room-bookings/partner-blocks/sync", { method: "POST" });
+  assert.equal(gone.status, 200, JSON.stringify(gone.json));
+  assert.equal((await api("/room-bookings/partner-blocks")).json.data.blocks, 0);
+
+  // WordPress refuses a block that overlaps a paid booking → listed for staff, no error.
+  cal(LIB).set("partner3", { id: "partner3", summary: "Offsite", status: "confirmed", start: { dateTime: `${day}T09:00:00+08:00` }, end: { dateTime: `${day}T10:00:00+08:00` } });
+  wpFake.clashRoomDates.add(`library|${day}`);
+  const clash = await api("/room-bookings/partner-blocks/sync", { method: "POST" });
+  assert.equal(clash.status, 200, JSON.stringify(clash.json));
+  assert.deepEqual(clash.json.data.blockConflicts.map((c) => c.conflicts), [["BNY-PAID01"]]);
+  assert.deepEqual((await api("/room-bookings/partner-blocks")).json.data.blockConflicts.map((c) => c.date), [day]);
+  assert.equal((await api("/room-bookings/partner-blocks")).json.data.supported, true);
 });

@@ -90,7 +90,8 @@ async function wpBlocks(method, path, body) {
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data };
 }
-const unsupported = (r) => r.status === 404 && (r.data?.code === "rest_no_route" || !r.data?.code);
+// Only WordPress's "no such route" means the plugin lacks the endpoint; a plain 404 on DELETE is "unknown ref".
+const unsupported = (r) => r.status === 404 && r.data?.code === "rest_no_route";
 
 /* ---------- state (Integration provider "wordpress", config.partnerBlocks) ---------- */
 async function loadState(workspaceId) {
@@ -113,6 +114,7 @@ export async function partnerBlockStatus(workspaceId) {
     supported: state.supported ?? null, // null = not tried yet
     blocks: Object.values(state.map || {}).length,
     clashes: state.clashes || [],
+    blockConflicts: state.blockConflicts || [],
     lastRun: state.lastRun || null,
     lastError: state.lastError || null,
   };
@@ -177,6 +179,8 @@ export async function syncPartnerBlocks(workspaceId, { dryRun = true } = {}) {
   if (dryRun) return result;
 
   const errors = [];
+  // Partner events WordPress refused because they overlap a paid booking or unexpired hold (409).
+  const blockConflicts = [];
   for (const r of remove) {
     if (!r.ref) { delete map[r.key]; continue; }
     const res = await wpBlocks("DELETE", `blocks/${encodeURIComponent(r.ref)}`);
@@ -188,13 +192,14 @@ export async function syncPartnerBlocks(workspaceId, { dryRun = true } = {}) {
     const res = await wpBlocks("POST", "blocks", { room: c.room, date: c.date, start: c.start, hours: c.hours, reason: c.reason, external_id: c.external_id });
     if (unsupported(res)) { await saveState(workspaceId, { ...state, map, supported: false, lastRun: new Date().toISOString(), lastError: WP_BLOCKS_UNSUPPORTED }); throw new AppError(WP_BLOCKS_UNSUPPORTED, 501, "WP_BLOCKS_UNSUPPORTED"); }
     if (res.status < 300 && res.data?.ref) map[c.key] = { ref: res.data.ref, room: c.room, date: c.date, start: c.start, hours: c.hours, eventId: c.eventId, calendarId: c.calendarId };
+    else if (res.status === 409) blockConflicts.push({ key: c.key, room: c.room, date: c.date, start: c.start, hours: c.hours, reason: c.reason, conflicts: res.data?.conflicts || [], message: res.data?.message || "Overlaps a booking." });
     else errors.push({ key: c.key, status: res.status, message: res.data?.message || `HTTP ${res.status}` });
   }
   await saveState(workspaceId, {
-    map, supported: true, clashes, lastRun: new Date().toISOString(),
+    map, supported: true, clashes, blockConflicts, lastRun: new Date().toISOString(),
     lastError: errors.length ? `${errors.length} block(s) failed: ${errors[0].message}` : null,
   });
-  return { ...result, supported: true, errors };
+  return { ...result, supported: true, errors, blockConflicts };
 }
 
 /** Background job: only when enabled and WordPress is known (or not yet known) to support blocks. */

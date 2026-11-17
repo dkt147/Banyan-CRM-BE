@@ -18,11 +18,13 @@ import {
   WP_BOOKING_RULES,
   WP_ROOMS,
   WP_SYNC_NOT_CONFIGURED_MESSAGE,
+  createStaffCheckout,
   getWpLastSync,
   roomLabel,
   syncWpIfStale,
   syncWpIncremental,
   syncWpRange,
+  syncWpRef,
   toRoomBookingRow,
 } from "../services/wpRoomBooking.service.js";
 import {
@@ -154,7 +156,9 @@ r.post(
   requirePermission("bookings.write"),
   asyncHandler(async (req, res) => {
     if (!env.BANYAN_CRM_TOKEN) throw new AppError(WP_SYNC_NOT_CONFIGURED_MESSAGE, 503, "WP_BOOKING_NOT_CONFIGURED");
-    const { from, to } = req.body || {};
+    const { from, to, ref } = req.body || {};
+    // { ref }: refresh one booking (fastest after a CRM checkout is paid).
+    if (ref) return res.json({ success: true, data: await syncWpRef(ref) });
     if (from || to) {
       if (!DATE_RX.test(from || "") || !DATE_RX.test(to || "")) throw new AppError("from and to must both be YYYY-MM-DD.", 400, "INVALID_DATES");
       const days = (new Date(to) - new Date(from)) / 86400000;
@@ -162,6 +166,16 @@ r.post(
       return res.json({ success: true, data: { mode: "range", ...(await syncWpRange(from, to)) } });
     }
     res.json({ success: true, data: await syncWpIncremental() });
+  }),
+);
+
+// Staff checkout via the CRM backend (no WordPress rate limit; notes prefixed server-side).
+// Body: { room, date, start, hours, first_name, last_name, email, phone, notes }. → { url, ref, session_id }
+r.post(
+  "/checkout",
+  requirePermission("bookings.write"),
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await createStaffCheckout(req.body || {}, req.user.name || req.user.email) });
   }),
 );
 

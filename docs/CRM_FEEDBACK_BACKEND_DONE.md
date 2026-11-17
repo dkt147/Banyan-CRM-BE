@@ -35,3 +35,17 @@
 2. Add a "Preview backfill" list and a partner-blocks preview showing **clashes**: the double bookings the client worries about.
 3. Show `googleCalendar.error` on a booking, with a retry button.
 4. The meeting-room calendar IDs are still to come from the client; leave them empty for now.
+
+## Update: WordPress plugin 1.1.1 is live (17 Nov 2026)
+
+New backend endpoints and changes since the first version of this file:
+
+- **`POST /room-bookings/checkout`** (`bookings.write`), body `{ room, date, start, hours, first_name, last_name, email, phone, notes }` → `{ url, ref, session_id }`.
+  - The backend calls WordPress with the token, so staff are **not** subject to the 12-per-10-min limit.
+  - It adds `Booked via CRM by <staff name>` itself, and syncs the pending hold into the CRM at once.
+  - WordPress errors pass through with their status and message (400/409/429/503).
+  - **Use this instead of calling WordPress `/checkout` from the browser.** Keep reading `/availability` and polling `/session` from the browser as before. Drop the URL parsing and use `session_id`.
+- **`POST /room-bookings/sync { ref }`** refreshes one booking. Call it when `/session` says `paid`; it's faster than `{ from, to }`.
+- `GET /room-bookings/partner-blocks` and the sync response now include **`blockConflicts`**: partner meetings WordPress refused because they overlap a paid booking or hold (`{ room, date, start, hours, reason, conflicts: ["BNY-…"], message }`). Show these to staff; someone has to resolve each one by hand.
+- Blocks created from partner calendar events show in the bookings list as `status: "blocked"`. Their `notes` start with `Partner:`. They are **not** copied into the Google calendar (the partner's own event is already there).
+- WordPress now pushes `booking.pending`, `booking.expired` and `booking.blocked` webhooks, so holds and blocks appear within seconds.

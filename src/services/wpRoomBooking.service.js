@@ -138,6 +138,9 @@ export function mapWpPayload(payload) {
       endTime: b.end_time || null,
       hours: Number(b.hours) || Math.round((endAt - startAt) / 3600000),
       createdAt: createdAt ? createdAt.toISOString() : null,
+      updatedAt: b.updated_at || null,
+      // Set on blocks the CRM created from partner calendar events ("gcal:<eventId>:<date>"), plugin 1.1.1+.
+      externalId: b.external_id || null,
       customer: {
         firstName: customer.first_name || "",
         lastName: customer.last_name || "",
@@ -359,6 +362,61 @@ async function upsertMany(rows, context) {
 
 const ymd = (d) => d.toISOString().slice(0, 10);
 const addDays = (d, n) => new Date(d.getTime() + n * 86400000);
+
+export const REF_RX = /^BNY-[A-Z0-9]{4,12}$/;
+
+/**
+ * Staff checkout through the CRM backend (plugin 1.1.1+: requests with the token skip the
+ * 12-per-10-minutes /checkout limit). The server adds "Booked via CRM by <staff>" itself.
+ * WordPress still validates everything and holds the slot; card entry stays on Stripe's page.
+ * Returns { url, ref, session_id } or throws the WordPress error (400/409/429/502/503) unchanged.
+ */
+export async function createStaffCheckout(input, staffName) {
+  if (!env.BANYAN_CRM_TOKEN) throw new AppError(WP_SYNC_NOT_CONFIGURED_MESSAGE, 503, "WP_BOOKING_NOT_CONFIGURED");
+  const prefix = `${CRM_NOTES_PREFIX} by ${staffName}`;
+  const notes = String(input.notes || "").trim();
+  const body = {
+    room: input.room,
+    date: input.date,
+    start: Number(input.start),
+    hours: Number(input.hours),
+    first_name: String(input.first_name || "").trim(),
+    last_name: String(input.last_name || "").trim(),
+    email: String(input.email || "").trim(),
+    phone: String(input.phone || "").trim(),
+    notes: (notes.startsWith(prefix) ? notes : notes ? `${prefix} – ${notes}` : prefix).slice(0, 1000),
+    website: "",
+    return_url: env.BANYAN_BOOKING_RETURN_URL,
+  };
+  let res;
+  try {
+    res = await fetch(new URL("checkout", env.BANYAN_WP_API_URL), {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json", "X-Banyan-Token": env.BANYAN_CRM_TOKEN },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30000),
+    });
+  } catch (error) {
+    throw new AppError(`WordPress checkout is unreachable: ${error.message}`, 502, "WP_BOOKING_UNREACHABLE");
+  }
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new AppError(json?.message || `WordPress checkout returned ${res.status}.`, [400, 409, 429, 503].includes(res.status) ? res.status : 502, "WP_CHECKOUT_FAILED");
+  const sessionId = json.session_id || String(json.url || "").match(/\/c\/pay\/(cs_[^/#?]+)/)?.[1] || null;
+  // Show the pending hold in the CRM straight away.
+  if (json.ref) syncWpRef(json.ref).catch((error) => console.error("[wp-bookings] post-checkout sync:", error.message));
+  return { url: json.url, ref: json.ref, session_id: sessionId };
+}
+
+/** Refresh one booking by ref (GET /bookings?ref=, plugin 1.1.1+). Used right after a CRM checkout is paid. */
+export async function syncWpRef(ref) {
+  const clean = String(ref || "").trim().toUpperCase();
+  if (!REF_RX.test(clean)) throw new AppError("ref must look like BNY-XXXXXX.", 400, "INVALID_REF");
+  const context = await getWpBookingContext();
+  // Older plugins ignore ?ref= and return everything: keep only the requested booking.
+  const rows = (await fetchWpBookings({ ref: clean })).filter((row) => row?.booking?.ref === clean);
+  if (!rows.length) throw new AppError(`WordPress has no booking ${clean}.`, 404, "NOT_FOUND");
+  return { mode: "ref", ref: clean, ...(await upsertMany(rows, context)) };
+}
 
 /** Pull every booking whose date is in [from, to] (YYYY-MM-DD), one month per request (500-row cap). */
 export async function syncWpRange(from, to) {

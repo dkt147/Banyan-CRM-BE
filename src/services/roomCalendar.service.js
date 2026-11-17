@@ -164,6 +164,8 @@ export function desiredCalendarState(booking, settings) {
   if (!settings.saved) return { calendarId, present: false, reason: "settings_not_saved" };
   if (!calendarId) return { calendarId, present: false, reason: "no_calendar_for_room" };
   if (!showStatus) return { calendarId, present: false, reason: `status_${wp.status}` };
+  // Blocks made from a partner's own calendar event must not be copied back into that calendar.
+  if (String(wp.externalId || "").startsWith("gcal:")) return { calendarId, present: false, reason: "partner_block" };
   if (new Date(booking.endAt) < new Date(Date.now() - 86400000)) return { calendarId, present: false, reason: "past" };
   const pushFrom = settings.pushFrom[wp.roomKey];
   const alreadyPushed = booking.metadata?.roomCalendar?.eventId && booking.metadata.roomCalendar.calendarId === calendarId;
