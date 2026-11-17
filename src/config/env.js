@@ -5,6 +5,18 @@ for (const key of required) {
   if (!process.env[key]) throw new Error(`${key} is required in .env`);
 }
 
+function parseJsonObject(name) {
+  const raw = process.env[name];
+  if (!raw) return {};
+  try {
+    const value = JSON.parse(raw);
+    if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  } catch {
+    // fall through
+  }
+  throw new Error(`${name} must be a JSON object, e.g. {"plink_123":"day_pass"}`);
+}
+
 export const env = {
   NODE_ENV: process.env.NODE_ENV || "development",
   MONGODB_AUTO_INDEX: process.env.MONGODB_AUTO_INDEX !== "false",
@@ -45,6 +57,10 @@ export const env = {
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || "",
   STRIPE_PUBLISHABLE_KEY: process.env.STRIPE_PUBLISHABLE_KEY || "",
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || "",
+  // Website day-pass Stripe Payment Links → product key, e.g.
+  // {"plink_123":"half_day_pass","plink_456":"day_pass","plink_789":"day_pass_10"}.
+  // Find the ids with `npm run stripe:payment-links`. Unlisted links are ignored.
+  STRIPE_PAYMENT_LINK_PRODUCTS: parseJsonObject("STRIPE_PAYMENT_LINK_PRODUCTS"),
   XERO_CLIENT_ID: process.env.XERO_CLIENT_ID || "",
   XERO_CLIENT_SECRET: process.env.XERO_CLIENT_SECRET || "",
   XERO_TENANT_ID: process.env.XERO_TENANT_ID || "",

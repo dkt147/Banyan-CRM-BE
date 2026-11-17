@@ -13,8 +13,9 @@ import { env } from "../config/env.js";
 import * as phase1 from "../migrations/20261109-phase1-foundation.js";
 import * as wpRoomBookings from "../migrations/20261111-wp-room-bookings.js";
 import * as crmFeedback from "../migrations/20261117-crm-feedback.js";
+import * as dayPassPurchases from "../migrations/20261118-day-pass-purchases.js";
 
-const MIGRATIONS = [phase1, wpRoomBookings, crmFeedback];
+const MIGRATIONS = [phase1, wpRoomBookings, crmFeedback, dayPassPurchases];
 
 const args = new Set(process.argv.slice(2));
 const apply = args.has("--apply");

@@ -107,5 +107,10 @@ for (const op of ["updateOne", "updateMany", "findOneAndUpdate"]) {
 }
 schema.index({ workspaceId: 1, pipelineId: 1, stageId: 1, status: 1 });
 schema.index({ workspaceId: 1, status: 1, closedAt: 1 });
+// One deal per paid Stripe Checkout Session (website day passes, services/dayPassPurchase.service.js).
+schema.index(
+  { workspaceId: 1, "metadata.stripeCheckoutSessionId": 1 },
+  { unique: true, partialFilterExpression: { "metadata.stripeCheckoutSessionId": { $type: "string" } } },
+);
 schema.index({ title: "text", source: "text" });
 export const Deal = mongoose.model("Deal", schema);

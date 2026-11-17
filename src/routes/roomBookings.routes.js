@@ -13,11 +13,13 @@ import { Booking } from "../models/Booking.js";
 import { AppError } from "../utils/AppError.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { escapeRegex } from "../utils/phone.js";
+import { can } from "../utils/permissions.js";
 import {
   CRM_NOTES_PREFIX,
   WP_BOOKING_RULES,
   WP_ROOMS,
   WP_SYNC_NOT_CONFIGURED_MESSAGE,
+  cancelWpBooking,
   createStaffCheckout,
   getWpLastSync,
   roomLabel,
@@ -176,6 +178,19 @@ r.post(
   requirePermission("bookings.write"),
   asyncHandler(async (req, res) => {
     res.json({ success: true, data: await createStaffCheckout(req.body || {}, req.user.name || req.user.email) });
+  }),
+);
+
+// Cancel in WordPress. Body { refund?: boolean, reason?: string }. A refund needs bookings.refund (admin).
+// 501 WP_CANCEL_UNSUPPORTED until the plugin has POST /bookings/{ref}/cancel.
+r.post(
+  "/:ref/cancel",
+  requirePermission("bookings.write"),
+  asyncHandler(async (req, res) => {
+    const refund = req.body?.refund === true;
+    if (refund && !can(req.user, "bookings.refund")) throw new AppError("Only admins can refund bookings.", 403, "FORBIDDEN");
+    const data = await cancelWpBooking(req.params.ref, { refund, reason: req.body?.reason, staffName: req.user.name || req.user.email });
+    res.json({ success: true, data });
   }),
 );
 

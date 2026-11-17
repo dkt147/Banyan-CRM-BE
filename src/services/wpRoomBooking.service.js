@@ -364,6 +364,34 @@ const ymd = (d) => d.toISOString().slice(0, 10);
 const addDays = (d, n) => new Date(d.getTime() + n * 86400000);
 
 export const REF_RX = /^BNY-[A-Z0-9]{4,12}$/;
+export const WP_CANCEL_UNSUPPORTED = "Cancelling from the CRM needs the WordPress plugin update (POST /bookings/{ref}/cancel). Cancel in WP Admin > Room Bookings for now.";
+
+/**
+ * Cancel a room booking in WordPress (plugin endpoint POST /bookings/{ref}/cancel, token).
+ * refund: full Stripe refund for paid bookings. Then refreshes the CRM copy (which also removes
+ * the CRM's Google Calendar event). Returns WordPress's { ref, status, refund }.
+ */
+export async function cancelWpBooking(ref, { refund = false, reason = "", staffName = "" } = {}) {
+  if (!env.BANYAN_CRM_TOKEN) throw new AppError(WP_SYNC_NOT_CONFIGURED_MESSAGE, 503, "WP_BOOKING_NOT_CONFIGURED");
+  const clean = String(ref || "").trim().toUpperCase();
+  if (!REF_RX.test(clean)) throw new AppError("ref must look like BNY-XXXXXX.", 400, "INVALID_REF");
+  let res;
+  try {
+    res = await fetch(new URL(`bookings/${encodeURIComponent(clean)}/cancel`, env.BANYAN_WP_API_URL), {
+      method: "POST",
+      headers: { Accept: "application/json", "Content-Type": "application/json", "X-Banyan-Token": env.BANYAN_CRM_TOKEN },
+      body: JSON.stringify({ refund: Boolean(refund), reason: String(reason || "").slice(0, 500), by: `${staffName || "Staff"} (CRM)` }),
+      signal: AbortSignal.timeout(30000),
+    });
+  } catch (error) {
+    throw new AppError(`WordPress is unreachable: ${error.message}`, 502, "WP_BOOKING_UNREACHABLE");
+  }
+  const json = await res.json().catch(() => ({}));
+  if (res.status === 404 && json?.code === "rest_no_route") throw new AppError(WP_CANCEL_UNSUPPORTED, 501, "WP_CANCEL_UNSUPPORTED");
+  if (!res.ok) throw new AppError(json?.message || `WordPress cancel returned ${res.status}.`, [400, 404, 409].includes(res.status) ? res.status : 502, "WP_CANCEL_FAILED");
+  await syncWpRef(clean).catch((error) => console.error("[wp-bookings] post-cancel sync:", error.message));
+  return json;
+}
 
 /**
  * Staff checkout through the CRM backend (plugin 1.1.1+: requests with the token skip the

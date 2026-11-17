@@ -8,6 +8,7 @@ import { WebhookEvent } from "../models/WebhookEvent.js";
 import { earnFromPayment } from "../services/loyalty.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { verifyStripeSignature } from "../utils/providerSignatures.js";
+import { handleDayPassStripeEvent } from "../services/dayPassPurchase.service.js";
 
 function safeEqual(left, right) {
   const a = Buffer.from(String(left || ""));
@@ -81,6 +82,9 @@ async function processStripeEvent(event, eventRecord) {
   const object = event.data?.object;
   const payment = await findLocalPayment(object);
   if (!payment) {
+    // Website day passes are sold through Stripe Payment Links (no CRM invoice).
+    const dayPass = await handleDayPassStripeEvent(event, eventRecord);
+    if (dayPass) return dayPass;
     eventRecord.status = "ignored";
     eventRecord.error =
       "No matching Banyan payment record was found for this Stripe event.";

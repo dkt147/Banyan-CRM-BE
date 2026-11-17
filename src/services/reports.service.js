@@ -21,7 +21,7 @@ export const METRIC_DEFINITIONS = {
   roomRevenue: "Paid WordPress room bookings (live Stripe payments only, HKD), by booking date.",
   roomHours: "Hours of paid WordPress room bookings (live only), by booking date.",
   bookings: "Bookings starting in the month, excluding cancelled, expired and blocked time.",
-  dayPasses: "Won day pass / day pass package deals, by close date.",
+  dayPasses: "Won day pass / day pass package deals (live payments only), by close date.",
   newContacts: "Contacts created.",
   newDeals: "Deals created.",
   dealsWon: "Deals won, by close date.",
@@ -29,6 +29,8 @@ export const METRIC_DEFINITIONS = {
   dealsLost: "Deals lost, by close date.",
 };
 
+// Stripe test-mode purchases (metadata.isTest) never count.
+const LIVE_DEALS = { "metadata.isTest": { $ne: true } };
 const MONTH_RX = /^(\d{4})-(0[1-9]|1[0-2])$/;
 const MAX_MONTHS = 120;
 
@@ -92,10 +94,10 @@ export async function periodicReport(workspaceId, { period = "month", from, to }
       "startAt",
       { bookings: { $sum: 1 } },
     ),
-    grouped(Deal, { workspaceId: ws, status: "won", productType: { $in: ["day_pass", "day_pass_package"] }, closedAt: range }, "closedAt", { dayPasses: { $sum: 1 } }),
+    grouped(Deal, { workspaceId: ws, ...LIVE_DEALS, status: "won", productType: { $in: ["day_pass", "day_pass_package"] }, closedAt: range }, "closedAt", { dayPasses: { $sum: 1 } }),
     grouped(Contact, { workspaceId: ws, createdAt: range }, "createdAt", { newContacts: { $sum: 1 } }),
-    grouped(Deal, { workspaceId: ws, createdAt: range }, "createdAt", { newDeals: { $sum: 1 } }),
-    grouped(Deal, { workspaceId: ws, status: { $in: ["won", "lost"] }, closedAt: range }, "closedAt", {
+    grouped(Deal, { workspaceId: ws, ...LIVE_DEALS, createdAt: range }, "createdAt", { newDeals: { $sum: 1 } }),
+    grouped(Deal, { workspaceId: ws, ...LIVE_DEALS, status: { $in: ["won", "lost"] }, closedAt: range }, "closedAt", {
       dealsWon: { $sum: { $cond: [{ $eq: ["$status", "won"] }, 1, 0] } },
       dealsWonValue: { $sum: { $cond: [{ $eq: ["$status", "won"] }, { $ifNull: ["$value", 0] }, 0] } },
       dealsLost: { $sum: { $cond: [{ $eq: ["$status", "lost"] }, 1, 0] } },
