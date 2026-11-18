@@ -20,11 +20,26 @@ export async function findContactByEmailOrPhone(workspaceId, { email, phone } = 
   return { contact: null, matchedBy: null };
 }
 
+/*
+ * Intake paths can run at the same moment for the same person (a WordPress webhook and the
+ * 2-minute sync both seeing a new booking). Calls for the same workspace + email/phone are run one
+ * after another in this process, and a create that still lost a race (another server instance)
+ * is undone in favour of the oldest matching contact.
+ */
+const intakeChains = new Map();
+function serialByKey(key, fn) {
+  const prev = intakeChains.get(key) || Promise.resolve();
+  const next = prev.catch(() => {}).then(fn);
+  intakeChains.set(key, next);
+  next.finally(() => { if (intakeChains.get(key) === next) intakeChains.delete(key); }).catch(() => {});
+  return next;
+}
+
 /**
  * Website intake: find a contact (email first, then phone) or create one.
  * Never overwrites an existing contact's name/email; only fills blanks.
  */
-export async function findOrCreateContact(workspaceId, ownerId, details = {}, { source = "website", tags = [] } = {}) {
+export async function findOrCreateContact(workspaceId, ownerId, details = {}, options = {}) {
   const email = String(details.email || "").trim().toLowerCase() || undefined;
   const phone = String(details.phone || "").trim() || undefined;
   if (!email && !normalizePhone(phone)) {
@@ -32,6 +47,11 @@ export async function findOrCreateContact(workspaceId, ownerId, details = {}, { 
     error.code = "CONTACT_IDENTIFIER_REQUIRED";
     throw error;
   }
+  const key = `${workspaceId}|${email || `tel:${normalizePhone(phone)}`}`;
+  return serialByKey(key, () => findOrCreateContactNow(workspaceId, ownerId, details, options, { email, phone }));
+}
+
+async function findOrCreateContactNow(workspaceId, ownerId, details, { source = "website", tags = [] }, { email, phone }) {
 
   const { contact, matchedBy } = await findContactByEmailOrPhone(workspaceId, { email, phone });
   if (contact) {
@@ -55,5 +75,12 @@ export async function findOrCreateContact(workspaceId, ownerId, details = {}, { 
     tags,
     language: "en",
   });
+
+  // Lost a race with another process? Keep the oldest contact and drop the one just made.
+  const again = await findContactByEmailOrPhone(workspaceId, { email, phone });
+  if (again.contact && String(again.contact._id) !== String(created._id)) {
+    await Contact.deleteOne({ _id: created._id });
+    return findOrCreateContactNow(workspaceId, ownerId, details, { source, tags }, { email, phone });
+  }
   return { contact: created, created: true, matchedBy: null };
 }

@@ -28,6 +28,7 @@ import {
   syncWpRange,
   syncWpRef,
   toRoomBookingRow,
+  buildRoomBookingTimeline,
 } from "../services/wpRoomBooking.service.js";
 import {
   backfillPreview,
@@ -261,7 +262,8 @@ r.get(
       .populate("contactId", "firstName lastName email phone")
       .lean();
     if (!b) throw new AppError("Booking not found.", 404, "NOT_FOUND");
-    res.json({ success: true, data: { ...toRoomBookingRow(b), notes: b.notes || "", raw: b.metadata?.wpRawPayload || null } });
+    const timeline = await buildRoomBookingTimeline(b);
+    res.json({ success: true, data: { ...toRoomBookingRow(b), notes: b.notes || "", timeline, raw: b.metadata?.wpRawPayload || null } });
   }),
 );
 

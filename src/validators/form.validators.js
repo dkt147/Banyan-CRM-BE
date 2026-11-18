@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MAX_TAGS_PER_CONTACT, TAG_PATTERN, normalizeTags } from "../utils/contactTags.js";
+import { tagsInputSchema } from "./contact.validators.js";
 
 /* Forms (feedback 17 Nov, #5). Payload shape matches Banyan-CRM-Admin src/pages/Forms.jsx. */
 export const FORM_TYPES = ["enquiry", "contact", "walk_in", "newsletter"];
@@ -41,10 +41,7 @@ const baseForm = {
   description: z.string().trim().max(2000).nullable().optional(),
   fields: z.array(fieldSchema).min(1, "Add at least one field.").max(40),
   consentText: z.string().trim().max(1000).nullable().optional(),
-  tagsToApply: z.preprocess(
-    (v) => (Array.isArray(v) ? normalizeTags(v) : v),
-    z.array(z.string().regex(TAG_PATTERN)).max(MAX_TAGS_PER_CONTACT),
-  ).optional(),
+  tagsToApply: tagsInputSchema.optional(),
   pipelineId: objectId.nullable().optional(),
   stageId: objectId.nullable().optional(),
   createTask: z.boolean().optional(),

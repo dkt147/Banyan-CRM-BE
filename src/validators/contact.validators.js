@@ -5,13 +5,27 @@ const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid ID");
 import { MAX_TAGS_PER_CONTACT, TAG_PATTERN, normalizeTag, normalizeTags } from "../utils/contactTags.js";
 
 // Tags: catalogue keys or custom snake_case keys. Input is normalised first ("Active Member" ->
-// "active_member"), then validated, so the stored list is always clean.
-const tagsSchema = z.preprocess(
-  (value) => (Array.isArray(value) ? normalizeTags(value) : value),
-  z
-    .array(z.string().regex(TAG_PATTERN, "Tags must be lowercase letters, numbers and underscores (max 50)."))
-    .max(MAX_TAGS_PER_CONTACT, `A contact can have at most ${MAX_TAGS_PER_CONTACT} tags.`),
-);
+// "active_member"), then validated, so the stored list is always clean. A value with nothing usable
+// in it ("!!!") is rejected with INVALID_TAG instead of being dropped silently.
+export const tagsInputSchema = z
+  .array(z.string().max(200))
+  .superRefine((values, ctx) => {
+    const invalid = values.filter((v) => !normalizeTag(v));
+    if (!invalid.length) return;
+    const list = invalid.map((v) => JSON.stringify(v)).join(", ");
+    ctx.addIssue({
+      code: "custom",
+      message: `${list} can't be ${invalid.length > 1 ? "tags" : "a tag"}. Use letters or numbers.`,
+      params: { code: "INVALID_TAG", invalid },
+    });
+  })
+  .transform((values) => normalizeTags(values))
+  .pipe(
+    z
+      .array(z.string().regex(TAG_PATTERN, "Tags must be lowercase letters, numbers and underscores (max 50)."))
+      .max(MAX_TAGS_PER_CONTACT, `A contact can have at most ${MAX_TAGS_PER_CONTACT} tags.`),
+  );
+const tagsSchema = tagsInputSchema;
 // List filter: "a,b" means the contact has all of them.
 const tagFilterSchema = z
   .string()

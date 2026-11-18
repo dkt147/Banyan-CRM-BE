@@ -293,6 +293,14 @@ test("plugin 1.2.0: cancel reason, who, when and refund are kept and shown", { s
   assert.equal(row.cancelledBy, "Felicia (CRM)");
   assert.equal(row.cancelledAt, "2026-11-18T03:00:00+00:00");
   assert.deepEqual(row.payment.refund, { id: "re_123", amount: 1160, amountMinor: 116000, currency: "HKD", status: "succeeded" });
+  assert.deepEqual(row.timeline, [
+    { at: "2026-11-11T15:04:53.000Z", text: "Booked on the website" },
+    { at: "2026-11-11T15:05:48.000Z", text: "Paid HK$1,160" },
+    { at: "2026-11-18T03:00:00.000Z", text: "Cancelled: Customer asked to move to next week", by: "Felicia (CRM)" },
+    { at: "2026-11-18T03:00:00.000Z", text: "Refunded HK$1,160 · re_123" },
+  ]);
+  const list = await api("/room-bookings?status=cancelled&range=all&search=BNY-REFUND");
+  assert.equal(list.json.data.items[0].timeline, undefined, "timeline is on the single-booking response only");
   const note = await models.Activity.findOne({ "metadata.wpRef": "BNY-REFUND", "metadata.wpStatus": "cancelled" });
   assert.match(note.body, /cancelled by Felicia \(CRM\) \(Customer asked to move to next week\) – Refunded HK\$1,160\.$/);
 });

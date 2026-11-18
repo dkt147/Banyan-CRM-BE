@@ -110,6 +110,8 @@ async function fakeWordPress(url, init = {}) {
   const out = (status, data) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
   if (token !== "fb-wp-token") return out(401, { code: "rest_forbidden", message: "Sorry, you are not allowed to do that." });
   if (p === "checkout" && method === "POST") {
+    if (wpFake.clashRoomDates.has(`${body.room}|${body.date}`))
+      return out(409, { code: "banyan_slot_taken", message: "Sorry, that time was just booked. Please choose another slot." });
     const ref = `BNY-CK${String(++wpFake.seq).padStart(4, "0")}`;
     const hh = (h) => String(h).padStart(2, "0");
     wpFake.checkouts.push(body);
@@ -265,6 +267,12 @@ test("#3 tags: list with counts, catalogue, multi-tag filter, validation", { ski
   assert.equal(tooMany.status, 400);
   const custom = await api(`/contacts/${ids.contact}`, { method: "PATCH", body: { tags: ["vip", "Coffee Lover"] } });
   assert.equal(custom.status, 200, JSON.stringify(custom.json));
+  const bad = await api(`/contacts/${ids.contact}`, { method: "PATCH", body: { tags: ["vip", "!!!"] } });
+  assert.equal(bad.status, 400, JSON.stringify(bad.json));
+  assert.equal(bad.json.code, "INVALID_TAG");
+  assert.equal(bad.json.message, "\"!!!\" can't be a tag. Use letters or numbers.");
+  assert.deepEqual(bad.json.details.invalid, ["!!!"]);
+  assert.deepEqual((await M.Contact.findById(ids.contact)).tags, ["vip", "coffee_lover"], "nothing saved");
 });
 
 test("#4 reports: monthly figures in HK months, zero-filled, yearly sums", { skip }, async () => {
@@ -394,6 +402,24 @@ test("#6 templates: Gmail send fills variables and sends HTML as multipart", { s
   const parts = [...mime.matchAll(/\r\n\r\n([A-Za-z0-9+/=\r\n]+?)\r\n--banyan_/g)].map((m) => Buffer.from(m[1].replace(/\r\n/g, ""), "base64").toString("utf8"));
   assert.ok(parts.some((p) => p === "Hi Daisy Pass from Felicia"), JSON.stringify(parts));
   assert.ok(parts.some((p) => p.includes("<p>Hi Daisy Pass from Felicia</p>")));
+});
+
+test("#6 templates: oversized body is a clean 413; Mongo errors never echo values", { skip }, async () => {
+  const huge = "<p>" + "x".repeat(600000) + "</p>";
+  const r = await api("/templates", { method: "POST", body: { name: "Huge", subject: "Hi", body: huge } });
+  assert.equal(r.status, 413, JSON.stringify(r.json).slice(0, 300));
+  assert.equal(r.json.code, "TEMPLATE_TOO_LARGE");
+  assert.equal(r.json.message, "This message is over 500 KB, the most an email can be.");
+  const t = await M.Template.findOne({ name: "Welcome" });
+  assert.equal((await api(`/templates/${t._id}`, { method: "PATCH", body: { body: huge } })).status, 413);
+  // Any model: a maxlength failure names the field and limit, not the value.
+  const { errorHandler } = await import("../src/middleware/error.middleware.js");
+  const doc = new M.Template({ workspaceId: ids.wsId, name: "x", subject: "SECRET-" + "s".repeat(1000), body: "b", createdBy: ids.admin });
+  const err = await doc.validate().catch((e) => e);
+  let sent;
+  errorHandler(err, {}, { status: () => ({ json: (j) => { sent = j; } }) }, () => {});
+  assert.equal(sent.message, "subject is too long (max 998 characters).");
+  assert.ok(!JSON.stringify(sent).includes("SECRET"));
 });
 
 test("#7 room calendars: settings, push without guests or emails, idempotent, cancel removes only ours", { skip }, async () => {
@@ -537,6 +563,13 @@ test("staff checkout via the CRM: token sent server-side, notes prefixed, pendin
   assert.equal(row.json.data.viaCrm, true);
   assert.equal((await api("/room-bookings/sync", { method: "POST", body: { ref: "BNY-NOPE00" } })).status, 404);
   assert.equal((await api("/room-bookings/sync", { method: "POST", body: { ref: "bad ref" } })).status, 400);
+
+  // Slot already paid or held: WordPress's 409 and message reach the modal unchanged.
+  wpFake.clashRoomDates.add(`small|${day}`);
+  const clash = await api("/room-bookings/checkout", { method: "POST", body: { room: "small", date: day, start: 10, hours: 1, first_name: "Pat", last_name: "Phone", email: "pat@example.com", phone: "+852 5555 1111" } });
+  wpFake.clashRoomDates.delete(`small|${day}`);
+  assert.equal(clash.status, 409, JSON.stringify(clash.json));
+  assert.equal(clash.json.message, "Sorry, that time was just booked. Please choose another slot.");
 });
 
 test("partner blocks applied: create, no loop back to Google, move, removed-by-hand, clash", { skip }, async () => {
@@ -613,4 +646,14 @@ test("public form HTML post: _return_url wins over an origin-only Referer, but o
   assert.match(bad.headers.get("location"), /^https:\/\/banyanworkspace\.com\/contact\/\?form_error=/);
   const sub = await M.FormSubmission.findOne({ formId: f.json.data._id, status: "processed" }).lean();
   assert.equal(sub.payload.values._return_url, undefined, "_return_url is not stored");
+});
+
+test("intake race: parallel findOrCreateContact for one email makes one contact", { skip }, async () => {
+  const { findOrCreateContact } = await import("../src/services/contactMatching.service.js");
+  const results = await Promise.all(
+    Array.from({ length: 5 }, (_, i) => findOrCreateContact(ids.wsId, ids.admin, { email: i % 2 ? " Race@Example.com" : "race@example.com", firstName: "Race" }, { tags: ["room_booking"] })),
+  );
+  assert.equal(await M.Contact.countDocuments({ workspaceId: ids.wsId, email: "race@example.com" }), 1);
+  assert.equal(new Set(results.map((r) => String(r.contact._id))).size, 1);
+  assert.equal(results.filter((r) => r.created).length, 1);
 });

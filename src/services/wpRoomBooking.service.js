@@ -649,6 +649,85 @@ export function toRoomBookingRow(b, now = new Date()) {
   };
 }
 
+const isoOrNull = (value) => {
+  const d = value ? new Date(value) : null;
+  return d && !Number.isNaN(d.valueOf()) ? d.toISOString() : null;
+};
+
+/**
+ * Booking history for the side panel (GET /room-bookings/:ref only), oldest first:
+ * [{ at: ISO, text, by? }]. Built from the stored WordPress state, the Google Calendar copy and
+ * Activity rows linked to the booking. Test-mode bookings are included (unlike contact timelines).
+ */
+export async function buildRoomBookingTimeline(b) {
+  const wp = b.metadata?.wp || {};
+  const row = toRoomBookingRow(b);
+  const items = [];
+  const add = (at, text, by) => {
+    const iso = isoOrNull(at);
+    if (iso && text) items.push({ at: iso, text, ...(by ? { by } : {}) });
+  };
+  const fallbackAt = wp.updatedAt || wp.lastSyncedAt || b.updatedAt;
+
+  // Created
+  const notes = wp.customer?.notes || "";
+  const staff = wp.viaCrm ? (notes.match(/^Booked via CRM by (.+?)(?:\s+[–-]\s+|\s*$)/) || [])[1] : null;
+  const createdText = row.partnerBlock
+    ? `Blocked from the partner calendar${notes.startsWith("Partner:") ? ` (${notes.slice(8).trim()})` : ""}`
+    : row.status === "blocked" || (wp.status === "cancelled" && !wp.payment)
+      ? "Blocked in WP Admin"
+      : wp.viaCrm
+        ? `Booked via CRM${staff ? ` by ${staff}` : ""}`
+        : wp.channel === "admin"
+          ? "Booked in WP Admin"
+          : "Booked on the website";
+  add(wp.createdAt || b.createdAt, createdText);
+
+  // Payment
+  const p = wp.payment;
+  if (p?.paidAt || (p && ["paid", "cancelled"].includes(wp.status) && p.status === "paid"))
+    add(p.paidAt || fallbackAt, `Paid ${money(p.amount)}${p.mode === "test" ? " (test mode)" : ""}`);
+  if (row.status === "expired") add(b.holdExpiresAt || fallbackAt, "Hold expired without payment");
+
+  // Cancellation and refund
+  if (wp.status === "cancelled") {
+    const at = wp.cancelledAt || fallbackAt;
+    add(at, `Cancelled${wp.cancelReason ? `: ${wp.cancelReason}` : ""}`, wp.cancelledBy || undefined);
+    const r = p?.refund;
+    if (r) {
+      const amount = money(r.amount ?? (r.amountMinor != null ? r.amountMinor / 100 : 0));
+      const text = r.status === "succeeded" ? `Refunded ${amount}` : `Refund ${r.status || "requested"} (${amount})`;
+      add(at, `${text}${r.id ? ` · ${r.id}` : ""}`);
+    }
+  }
+
+  // Google Calendar copy (latest state only)
+  const cal = b.metadata?.roomCalendar;
+  if (cal?.syncedAt) {
+    const room = `${(wp.roomName || "room").replace(/\s*room$/i, "")} room calendar`;
+    if (cal.error) add(cal.syncedAt, `Calendar update failed: ${cal.error}`);
+    else if (cal.action === "inserted") add(cal.syncedAt, `Added to ${room}`);
+    else if (cal.action === "updated") add(cal.syncedAt, `Updated in ${room}`);
+    else if (cal.action === "removed") add(cal.syncedAt, `Removed from ${room}`);
+  }
+
+  // Notes, calls, emails, etc. that staff logged against this booking (not the automatic paid/cancelled rows).
+  const activities = await Activity.find({
+    workspaceId: b.workspaceId,
+    "metadata.bookingId": String(b._id),
+    "metadata.wpStatus": { $exists: false },
+  })
+    .sort({ occurredAt: 1 })
+    .limit(100)
+    .populate("userId", "name")
+    .lean();
+  for (const a of activities)
+    add(a.occurredAt || a.createdAt, [a.subject, a.body].filter(Boolean).join(": ").slice(0, 500), a.userId?.name);
+
+  // Stable sort: same-second events keep the order they were added in.
+  return items.map((item, i) => ({ item, i })).sort((x, y) => x.item.at.localeCompare(y.item.at) || x.i - y.i).map(({ item }) => item);
+}
+
 /** Express guard: rows mirrored from WordPress cannot be edited, confirmed, cancelled or deleted in the CRM. */
 export async function assertNotWpManaged(workspaceId, bookingId) {
   const row = await Booking.findOne({ _id: bookingId, workspaceId }).select("externalRef").lean().catch(() => null);
