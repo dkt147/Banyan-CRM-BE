@@ -10,6 +10,8 @@ import {
 
 const OAUTH_AUDIENCE = "banyan-provider-integration";
 const OAUTH_ISSUER = "banyan-crm";
+// How long a Connect click stays valid (consent with 2-step verification can take a while).
+const OAUTH_STATE_TTL_SECONDS = 20 * 60;
 const XERO_SCOPES = [
   "openid",
   "profile",
@@ -54,12 +56,16 @@ function publicApiUrl() {
   );
 }
 
-function googleCallbackPage(res, success, _title, _message) {
+function googleCallbackPage(res, success, _title, message, code) {
   // Return to a React route instead of using inline JavaScript, which is blocked
   // by the backend's default Helmet Content-Security-Policy. The popup route
   // posts the result to its opener after the frontend loads.
   const redirect = new URL("/integrations", env.CLIENT_URL);
   redirect.searchParams.set("google_oauth", success ? "success" : "error");
+  if (!success) {
+    if (code) redirect.searchParams.set("google_oauth_code", code);
+    if (message) redirect.searchParams.set("google_oauth_message", String(message).slice(0, 300));
+  }
   return res.redirect(302, redirect.toString());
 }
 
@@ -93,29 +99,53 @@ function createOAuthState(user, provider) {
     },
     env.INTEGRATION_OAUTH_STATE_SECRET,
     {
-      expiresIn: "10m",
+      expiresIn: OAUTH_STATE_TTL_SECONDS,
       audience: OAUTH_AUDIENCE,
       issuer: OAUTH_ISSUER,
     },
   );
 }
 
+/**
+ * The state is a signed, self-contained token (user, workspace, provider, expiry): nothing is kept
+ * in server memory or cookies, so it survives restarts, sleeps and several Connect clicks.
+ * INTEGRATION_OAUTH_STATE_SECRET_PREVIOUS (optional) keeps sign-ins started before a secret
+ * change working.
+ */
 function verifyOAuthState(value, expectedProvider) {
   if (!value || typeof value !== "string") {
-    throw new AppError("OAuth state is missing.", 400, "INVALID_OAUTH_STATE");
+    throw new AppError("OAuth state is missing.", 400, "INVALID_OAUTH_STATE", { reason: "missing" });
   }
-  let state;
-  try {
-    state = jwt.verify(value, env.INTEGRATION_OAUTH_STATE_SECRET, {
-      audience: OAUTH_AUDIENCE,
-      issuer: OAUTH_ISSUER,
-    });
-  } catch {
-    throw new AppError(
-      "OAuth state is invalid or expired.",
-      400,
-      "INVALID_OAUTH_STATE",
+  const secrets = [env.INTEGRATION_OAUTH_STATE_SECRET, env.INTEGRATION_OAUTH_STATE_SECRET_PREVIOUS].filter(Boolean);
+  let state = null;
+  let failure = null;
+  for (const secret of secrets) {
+    try {
+      state = jwt.verify(value, secret, { audience: OAUTH_AUDIENCE, issuer: OAUTH_ISSUER });
+      break;
+    } catch (error) {
+      failure ||= error;
+      if (error.name === "TokenExpiredError") break; // the signature was fine
+    }
+  }
+  if (!state) {
+    const reason =
+      failure?.name === "TokenExpiredError" ? "expired"
+      : failure?.message === "invalid signature" ? "signature"
+      : /audience|issuer/.test(failure?.message || "") ? "audience"
+      : "malformed";
+    // Unverified claims only, for the log: never the token or the secret.
+    const claims = jwt.decode(value) || {};
+    const ageSeconds = claims.iat ? Math.round(Date.now() / 1000 - claims.iat) : null;
+    console.warn(
+      `[oauth] ${expectedProvider} state rejected: ${reason} (${failure?.message}); age ${ageSeconds ?? "?"}s, provider ${claims.provider || "?"}, length ${value.length}`,
     );
+    const message = {
+      expired: "The sign-in link expired. Click Connect again and finish within 20 minutes.",
+      signature:
+        "This sign-in was started on a different server, or before the server's OAuth secret changed. Click Connect again.",
+    }[reason] || "OAuth state is invalid or expired.";
+    throw new AppError(message, 400, "INVALID_OAUTH_STATE", { reason, ageSeconds });
   }
   if (
     state.type !== "integration_state" ||
@@ -123,11 +153,7 @@ function verifyOAuthState(value, expectedProvider) {
     !state.sub ||
     !state.workspaceId
   ) {
-    throw new AppError(
-      "OAuth state does not match this integration.",
-      400,
-      "INVALID_OAUTH_STATE",
-    );
+    throw new AppError("OAuth state does not match this integration.", 400, "INVALID_OAUTH_STATE", { reason: "provider" });
   }
   return state;
 }
@@ -149,7 +175,7 @@ function callbackPage(res, success, title, message) {
 async function responseJson(response, provider, action) {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    console.error(`${provider} ${action} failed with HTTP ${response.status}.`);
+    console.error(`${provider} ${action} failed with HTTP ${response.status}${body?.error ? ` (${body.error})` : ""}.`);
     throw new AppError(
       `${provider} authorization could not be completed. Check the app credentials, redirect URI, and requested scopes.`,
       502,
@@ -244,7 +270,7 @@ export const startXeroConnect = asyncHandler(async (req, res) => {
     data: {
       authorizationUrl: `https://login.xero.com/identity/connect/authorize?${params.toString()}`,
       redirectUri,
-      expiresInSeconds: 600,
+      expiresInSeconds: OAUTH_STATE_TTL_SECONDS,
     },
   });
 });
@@ -368,12 +394,22 @@ export const startGoogleConnect = asyncHandler(async (req, res) => {
       authorizationUrl: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`,
       redirectUri,
       scopes: GOOGLE_SCOPES,
-      expiresInSeconds: 600,
+      expiresInSeconds: OAUTH_STATE_TTL_SECONDS,
     },
   });
 });
 
+// Any failure goes back to the CRM page (popup) with a code and message, never a raw JSON page.
 export const googleCallback = asyncHandler(async (req, res) => {
+  try {
+    return await completeGoogleCallback(req, res);
+  } catch (error) {
+    console.warn(`[oauth] google callback failed: ${error.code || error.name}: ${error.message}`);
+    return googleCallbackPage(res, false, "Google connection failed", error.message, error.code || "GOOGLE_OAUTH_FAILED");
+  }
+});
+
+async function completeGoogleCallback(req, res) {
   if (req.query.error) {
     return googleCallbackPage(
       res,
@@ -465,7 +501,7 @@ export const googleCallback = asyncHandler(async (req, res) => {
     "Google connected",
     "Google Workspace and Calendar authorization has been saved to Banyan.",
   );
-});
+}
 
 export const docusignCallback = (req, res) => {
   if (req.query.error || !req.query.code) {

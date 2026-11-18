@@ -54,6 +54,8 @@ export const env = {
     process.env.INTEGRATION_TOKEN_ENCRYPTION_KEY || "",
   INTEGRATION_OAUTH_STATE_SECRET:
     process.env.INTEGRATION_OAUTH_STATE_SECRET || "",
+  // Optional: the old value after rotating INTEGRATION_OAUTH_STATE_SECRET, so sign-ins already in progress still finish.
+  INTEGRATION_OAUTH_STATE_SECRET_PREVIOUS: process.env.INTEGRATION_OAUTH_STATE_SECRET_PREVIOUS || "",
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || "",
   STRIPE_PUBLISHABLE_KEY: process.env.STRIPE_PUBLISHABLE_KEY || "",
   STRIPE_WEBHOOK_SECRET: process.env.STRIPE_WEBHOOK_SECRET || "",
