@@ -1,5 +1,7 @@
 import { Router } from "express";
-import { requireAuth } from "../middleware/auth.middleware.js";
+import { requireAuth, requirePermission } from "../middleware/auth.middleware.js";
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { flodeskStatus } from "../services/flodesk.service.js";
 import { resourceRouter } from "./resource.routes.js";
 import { resourceRegistry } from "../utils/resourceRegistry.js";
 import {
@@ -67,6 +69,14 @@ r.get(
   "/docusign/agreements/:agreementId/status",
   requireAuth,
   getDocuSignAgreementStatus,
+);
+
+// Flodesk newsletter sign-ups: connection, segments found, interest -> segment mapping (admin).
+r.get(
+  "/flodesk",
+  requireAuth,
+  requirePermission("workspace.manage"),
+  asyncHandler(async (req, res) => res.json({ success: true, data: await flodeskStatus(req.workspaceId) })),
 );
 
 // Preserve the existing integration record CRUD endpoints.

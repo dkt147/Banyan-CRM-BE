@@ -50,6 +50,8 @@ export const env = {
   COOKIE_SAME_SITE: process.env.COOKIE_SAME_SITE || "lax",
   // Public HTTPS API origin, without the /api/v1 suffix.
   PUBLIC_API_URL: (process.env.PUBLIC_API_URL || "").replace(/\/+$/, ""),
+  // Flodesk newsletter sign-ups (services/flodesk.service.js). Secret: never log or commit.
+  FLODESK_API_KEY: process.env.FLODESK_API_KEY || "",
   INTEGRATION_TOKEN_ENCRYPTION_KEY:
     process.env.INTEGRATION_TOKEN_ENCRYPTION_KEY || "",
   INTEGRATION_OAUTH_STATE_SECRET:

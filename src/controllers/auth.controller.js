@@ -15,7 +15,7 @@ export const registerController = asyncHandler(async (req, res) => {
   setRefreshCookie(res, out.refreshToken);
   res.status(201).json({
     success: true,
-    data: { user: out.user, accessToken: out.accessToken },
+    data: { user: out.user, accessToken: out.accessToken, refreshToken: out.refreshToken },
   });
 });
 export const loginController = asyncHandler(async (req, res) => {
@@ -26,11 +26,12 @@ export const loginController = asyncHandler(async (req, res) => {
   setRefreshCookie(res, out.refreshToken);
   res.json({
     success: true,
-    data: { user: out.user, accessToken: out.accessToken },
+    data: { user: out.user, accessToken: out.accessToken, refreshToken: out.refreshToken },
   });
 });
 export const refreshController = asyncHandler(async (req, res) => {
-  const raw = req.cookies.banyan_refresh_token || req.body.refreshToken;
+  // Body first: Safari blocks the cross-site cookie, so the CRM keeps the token itself.
+  const raw = req.body?.refreshToken || req.cookies.banyan_refresh_token;
   const out = await rotateRefreshToken(raw, {
     userAgent: req.get("user-agent"),
     ipAddress: req.ip,
@@ -38,11 +39,11 @@ export const refreshController = asyncHandler(async (req, res) => {
   setRefreshCookie(res, out.refreshToken);
   res.json({
     success: true,
-    data: { user: out.user, accessToken: out.accessToken },
+    data: { user: out.user, accessToken: out.accessToken, refreshToken: out.refreshToken },
   });
 });
 export const logoutController = asyncHandler(async (req, res) => {
-  await logout(req.cookies.banyan_refresh_token || req.body.refreshToken);
+  await logout(req.body?.refreshToken || req.cookies.banyan_refresh_token);
   clearRefreshCookie(res);
   res.json({ success: true, message: "Logged out successfully." });
 });

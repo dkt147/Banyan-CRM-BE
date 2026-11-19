@@ -20,6 +20,7 @@ export const PERMISSIONS = {
   "records.write": ["admin", "sales"], // create and edit records
   "bookings.write": ["admin", "sales"], // create and cancel bookings
   "bookings.refund": ["admin"],
+  "credits.adjust": ["admin"], // one-off meeting room credit top-ups and corrections
   "resources.manage": ["admin"], // rooms, opening hours and pricing
   "workflows.view": ["admin", "sales"], // Sales: view only
   "workflows.manage": ["admin"], // create, edit, activate, run

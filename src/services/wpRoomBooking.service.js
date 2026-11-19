@@ -22,6 +22,7 @@ import { AppError } from "../utils/AppError.js";
 import { HK_TZ } from "../utils/hkTime.js";
 import { findOrCreateContact } from "./contactMatching.service.js";
 import { queueRoomCalendarSync } from "./roomCalendar.service.js";
+import { refundCreditsForBooking } from "./credits.service.js";
 
 /* ---------- business rules (spec §3; no config endpoint exists in WordPress) ---------- */
 export const WP_ROOMS = [
@@ -155,6 +156,9 @@ export function mapWpPayload(payload) {
         ? null
         : {
             provider: payment.provider || "stripe",
+            // "stripe" (card) or "credits" (meeting room credits, amount 0; WP handoff §3).
+            method: payment.method || (payment.credit_ref ? "credits" : "stripe"),
+            creditRef: payment.credit_ref || null,
             mode: payment.mode === "live" ? "live" : payment.mode === "test" ? "test" : payment.mode || null,
             amount: payment.amount ?? (amountMinor != null ? amountMinor / 100 : null),
             amountMinor,
@@ -229,8 +233,15 @@ async function ensureRoomResource(workspaceId, mapped) {
 }
 
 /* ---------- upsert ---------- */
-/** "Refunded HK$1,160" | "refund pending (HK$1,160)" | "no refund". */
+/** "paid HK$1,160" | "paid with 2 meeting room credits". */
+function paidNote(wp) {
+  if (wp.payment?.method === "credits") return `paid with ${wp.hours} meeting room credit${wp.hours === 1 ? "" : "s"}`;
+  return `paid ${money(wp.payment?.amount)}`;
+}
+
+/** "Refunded HK$1,160" | "refund pending (HK$1,160)" | "no refund" | "credits returned". */
 function refundNote(payment) {
+  if (payment?.method === "credits") return "credits returned";
   const r = payment?.refund;
   if (!r) return "no refund";
   const amount = money(r.amount ?? (r.amountMinor != null ? r.amountMinor / 100 : 0));
@@ -245,7 +256,7 @@ function activityFor(previousStatus, mapped) {
   if (wp.status === "paid")
     return {
       subject: `Room booking paid ${wp.ref}`,
-      body: `Booked ${wp.roomName}, ${when}, paid ${money(wp.payment?.amount)}${wp.viaCrm ? " (booked via CRM)" : ""}.`,
+      body: `Booked ${wp.roomName}, ${when}, ${paidNote(wp)}${wp.viaCrm ? " (booked via CRM)" : ""}.`,
     };
   if (wp.status === "cancelled" && previousStatus === "paid")
     return {
@@ -331,6 +342,12 @@ export async function upsertWpBooking(payload, { origin = "snapshot", event = nu
       occurredAt: new Date(),
       metadata: { bookingId: String(booking._id), wpRef: mapped.ref, wpStatus: mapped.wpStatus, paymentMode: mapped.wp.payment?.mode || null },
     });
+
+  // Cancelled credit booking (CRM or WP Admin): give the hours back once.
+  if (mapped.wp.status === "cancelled" && mapped.wp.payment?.method === "credits")
+    await refundCreditsForBooking(workspaceId, mapped.ref, mapped.wp.cancelledBy).catch((error) =>
+      console.error(`[credits] refund for ${mapped.ref}:`, error.message),
+    );
 
   // Mirror into the shared Google room calendar in the background (never blocks the webhook).
   if (changed) queueRoomCalendarSync(booking._id);
@@ -686,14 +703,15 @@ export async function buildRoomBookingTimeline(b) {
   // Payment
   const p = wp.payment;
   if (p?.paidAt || (p && ["paid", "cancelled"].includes(wp.status) && p.status === "paid"))
-    add(p.paidAt || fallbackAt, `Paid ${money(p.amount)}${p.mode === "test" ? " (test mode)" : ""}`);
+    add(p.paidAt || fallbackAt, `${paidNote(wp).replace(/^p/, "P")}${p.mode === "test" ? " (test mode)" : ""}`);
   if (row.status === "expired") add(b.holdExpiresAt || fallbackAt, "Hold expired without payment");
 
   // Cancellation and refund
   if (wp.status === "cancelled") {
     const at = wp.cancelledAt || fallbackAt;
     add(at, `Cancelled${wp.cancelReason ? `: ${wp.cancelReason}` : ""}`, wp.cancelledBy || undefined);
-    const r = p?.refund;
+    if (p?.method === "credits") add(at, `Meeting room credits returned (${wp.hours} h)`);
+    const r = p?.method === "credits" ? null : p?.refund;
     if (r) {
       const amount = money(r.amount ?? (r.amountMinor != null ? r.amountMinor / 100 : 0));
       const text = r.status === "succeeded" ? `Refunded ${amount}` : `Refund ${r.status || "requested"} (${amount})`;

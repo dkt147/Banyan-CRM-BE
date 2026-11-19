@@ -10,6 +10,7 @@ import { resourceRegistry } from "../utils/resourceRegistry.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { AppError } from "../utils/AppError.js";
 import { createFormSchema, updateFormSchema } from "../validators/form.validators.js";
+import { publishFormPage, removeFormPage } from "../services/wpFormPages.service.js";
 
 // Forms (feedback 17 Nov, #5). Everyone can view; create/edit/delete need forms.manage (admin).
 // Public submissions: routes/publicForms.routes.js.
@@ -76,6 +77,27 @@ r.post(
     );
     if (!form) throw new AppError("Form not found.", 404, "NOT_FOUND");
     res.json({ success: true, data: form });
+  }),
+);
+
+// Website page for the form (WordPress, §2.3). Body { path: "forms/walk-in" }. Idempotent.
+r.post(
+  "/:id/page",
+  requirePermission("forms.manage"),
+  asyncHandler(async (req, res) => {
+    const form = await Form.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
+    if (!form) throw new AppError("Form not found.", 404, "NOT_FOUND");
+    const page = await publishFormPage(form, req.body?.path);
+    res.json({ success: true, data: { page } });
+  }),
+);
+r.delete(
+  "/:id/page",
+  requirePermission("forms.manage"),
+  asyncHandler(async (req, res) => {
+    const form = await Form.findOne({ _id: req.params.id, workspaceId: req.workspaceId });
+    if (!form) throw new AppError("Form not found.", 404, "NOT_FOUND");
+    res.json({ success: true, data: await removeFormPage(form) });
   }),
 );
 

@@ -7,6 +7,7 @@ import { pollGmailInboxes } from "./services/gmailPoller.service.js";
 import { runScheduledAutomations } from "./services/automation.service.js";
 import { getWpBookingContext, runWpBookingSyncJob } from "./services/wpRoomBooking.service.js";
 import { runPartnerBlocksJob } from "./services/partnerBlocks.service.js";
+import { relabelTestEvents } from "./services/roomCalendar.service.js";
 await connectDatabase();
 app.listen(env.PORT, () => {
   console.log(`Banyan API listening on ${env.PORT}`);
@@ -32,5 +33,7 @@ app.listen(env.PORT, () => {
   const partnerBlocks = () =>
     getWpBookingContext().then(({ workspaceId }) => runPartnerBlocksJob(workspaceId)).catch(() => {});
   setTimeout(partnerBlocks, 90_000);
+  // Label test bookings already in the room calendars "TEST – " (no-op once done).
+  setTimeout(() => relabelTestEvents().catch((e) => console.error("[room-calendar] relabel:", e.message)), 120_000);
   setInterval(partnerBlocks, 10 * 60 * 1000).unref();
 });

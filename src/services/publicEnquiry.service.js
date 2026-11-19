@@ -150,8 +150,8 @@ function normalizeKey(value) {
     .replace(/\s+/g, " ");
 }
 
-function resolveServices(input) {
-  if (Array.isArray(input) && input.length > 1) {
+function resolveServices(input, { allowMultiple = false } = {}) {
+  if (!allowMultiple && Array.isArray(input) && input.length > 1) {
     throw new AppError(
       "Please select only one service per website enquiry. The team can add other deals manually in CRM.",
       400,
@@ -260,8 +260,16 @@ function productTypeForGroup(services, pipelineKey) {
   return "other";
 }
 
-export async function createPublicEnquiry(payload) {
-  const services = resolveServices(payload.interests);
+/**
+ * options (CRM forms; the website pop-up passes none):
+ *   allowMultiple: several services in one enquiry (walk-in forms); one deal per pipeline as usual.
+ *   label: "Website enquiry" | "Walk-in enquiry" (deal, activity and task titles); tag: contact tag.
+ *   createTask: false skips the follow-up task; sourceForm / origin: recorded on the deal / task.
+ */
+export async function createPublicEnquiry(payload, options = {}) {
+  const label = options.label || "Website enquiry";
+  const tag = options.tag || "website_enquiry";
+  const services = resolveServices(payload.interests, { allowMultiple: options.allowMultiple });
   const { workspace, owner } = await getIntakeContext();
   const pipelineKeys = [
     ...new Set(services.map((service) => service.pipelineKey)),
@@ -320,7 +328,7 @@ export async function createPublicEnquiry(payload) {
       email,
       phone: payload.phone || undefined,
       source: "website",
-      tags: ["website_enquiry"],
+      tags: [tag],
       notes: payload.notes || undefined,
       language: "en",
       metadata: { websiteEnquiry: true, website: env.PUBLIC_WEBSITE_URL },
@@ -331,7 +339,7 @@ export async function createPublicEnquiry(payload) {
     if (!contact.email) contact.email = email;
     if (payload.phone) contact.phone = payload.phone;
     if (!contact.source) contact.source = "website";
-    contact.tags = [...new Set([...(contact.tags || []), "website_enquiry"])];
+    contact.tags = [...new Set([...(contact.tags || []), tag])];
     if (payload.notes && !contact.notes) contact.notes = payload.notes;
     const existingOwnerIsActive = contact.ownerId
       ? await User.exists({
@@ -367,7 +375,7 @@ export async function createPublicEnquiry(payload) {
     const pipeline = pipelineByKey.get(pipelineKey);
     const stage = stageByPipelineId.get(String(pipeline._id));
     const serviceLabel = groupedServiceLabel(groupServices);
-    const title = `Website enquiry — ${fullName}: ${serviceLabel}`.slice(
+    const title = `${label} — ${fullName}: ${serviceLabel}`.slice(
       0,
       200,
     );
@@ -383,11 +391,11 @@ export async function createPublicEnquiry(payload) {
       source: "website",
       ownerId: leadOwnerId,
       status: "open",
-      description: payload.notes || `Website enquiry for ${serviceLabel}.`,
+      description: payload.notes || `${label} for ${serviceLabel}.`,
       lastActivityAt: receivedAt,
       stageChangedAt: receivedAt,
       metadata: {
-        sourceForm: "banyanworkspace.com — Find Your Space at Banyan",
+        sourceForm: options.sourceForm || "banyanworkspace.com — Find Your Space at Banyan",
         sourceUrl: env.PUBLIC_WEBSITE_URL,
         receivedAt,
         allInterests: services.map((service) => service.label),
@@ -407,7 +415,7 @@ export async function createPublicEnquiry(payload) {
         type: "website_enquiry_received",
         contactId: contact._id,
         dealId: deal._id,
-        subject: "Website enquiry received",
+        subject: `${label} received`,
         body:
           payload.notes ||
           `Interested in: ${deal.metadata?.interestsForPipeline?.join(", ") || "Banyan Workspace services"}`,
@@ -429,10 +437,10 @@ export async function createPublicEnquiry(payload) {
   // One follow-up task per enquiry, linked to the first opportunity to avoid duplicate tasks
   // when the visitor selects services that belong to more than one pipeline.
   let followUpTask = null;
-  try {
+  if (options.createTask !== false) try {
     followUpTask = await Task.create({
       workspaceId: workspace._id,
-      title: `Follow up: website enquiry — ${fullName}`.slice(0, 200),
+      title: `Follow up: ${label.toLowerCase()} — ${fullName}`.slice(0, 200),
       description:
         `Contact ${fullName} (${email}) before the end of today. Interested in: ${services.map((service) => service.label).join(", ")}.${payload.notes ? ` Notes: ${payload.notes}` : ""}`.slice(
           0,
@@ -450,7 +458,7 @@ export async function createPublicEnquiry(payload) {
       status: "pending",
       source: "system",
       metadata: {
-        origin: "website_enquiry",
+        origin: options.origin || "website_enquiry",
         allDealIds: deals.map((deal) => String(deal._id)),
       },
     });

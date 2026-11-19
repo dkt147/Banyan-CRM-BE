@@ -20,6 +20,8 @@ const schema = new mongoose.Schema(
     ip: String,
     userAgent: String,
     processedAt: Date,
+    // { status: "pending" | "added" | "skipped" | "failed", segments: [names], reason, at }, or null when off.
+    flodesk: { type: mongoose.Schema.Types.Mixed, default: null },
   },
   { timestamps: true },
 );

@@ -23,7 +23,7 @@ const appCors = cors({
 });
 // Public form submissions: each form has its own allowedOrigins, checked in the route
 // (routes/publicForms.routes.js). The CORS layer reflects any origin, without credentials.
-const publicFormCors = cors({ origin: true, credentials: false, methods: ["POST", "OPTIONS"] });
+const publicFormCors = cors({ origin: true, credentials: false, methods: ["GET", "POST", "OPTIONS"] });
 
 export const securityMiddleware = [
   helmet(),

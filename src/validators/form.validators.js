@@ -4,7 +4,27 @@ import { tagsInputSchema } from "./contact.validators.js";
 /* Forms (feedback 17 Nov, #5). Payload shape matches Banyan-CRM-Admin src/pages/Forms.jsx. */
 export const FORM_TYPES = ["enquiry", "contact", "walk_in", "newsletter"];
 export const FIELD_TYPES = ["text", "email", "tel", "textarea", "checkboxes", "select"];
-export const MAP_TO = ["firstName", "lastName", "email", "phone", "company", "interests", "notes"];
+// source: "How did you hear about us?" (contact.source when empty); newsletterOptIn: Yes/No marketing consent.
+export const MAP_TO = ["firstName", "lastName", "email", "phone", "company", "interests", "notes", "source", "newsletterOptIn"];
+export const FORM_LAYOUTS = ["centered", "image-left"];
+const hexColor = z.string().trim().regex(/^#[0-9A-Fa-f]{6}$/, "Colours are hex values like #2D5F4C.");
+const designSchema = z
+  .object({
+    title: z.string().trim().max(160).optional(),
+    intro: z.string().trim().max(1000).optional(),
+    buttonText: z.string().trim().max(40).optional(),
+    successMessage: z.string().trim().max(300).optional(),
+    layout: z.enum(FORM_LAYOUTS).optional(),
+    imageUrl: z.union([z.literal(""), z.string().trim().max(500).url().refine((u) => u.startsWith("https://"), "The image must be an https:// address.")]).optional(),
+    headingFont: z.string().trim().max(60).optional(),
+    bodyFont: z.string().trim().max(60).optional(),
+    colors: z
+      .object({ text: hexColor, button: hexColor, buttonHover: hexColor, buttonText: hexColor, background: hexColor, page: hexColor })
+      .partial()
+      .strict()
+      .optional(),
+  })
+  .strict();
 // Field keys that the public endpoint reserves for itself.
 const RESERVED_KEYS = new Set(["publickey", "consent", "website", "_honeypot", "website_confirm"]);
 
@@ -48,6 +68,8 @@ const baseForm = {
   notifyEmails: z.array(z.string().trim().toLowerCase().email("Invalid notification email.")).max(10).optional(),
   allowedOrigins: z.array(originSchema).max(10).optional(),
   isActive: z.boolean().optional(),
+  design: designSchema.nullable().optional(),
+  flodesk: z.object({ enabled: z.boolean() }).strict().optional(),
 };
 
 function checkFields(form, ctx) {

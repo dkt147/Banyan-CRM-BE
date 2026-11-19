@@ -37,7 +37,12 @@ export const createCompanySchema = z.object({
   isArchived: z.boolean().optional(),
 });
 
-export const updateCompanySchema = createCompanySchema.partial();
+export const updateCompanySchema = createCompanySchema
+  .extend({
+    // Monthly meeting room credits in hours (1 credit = 1 hour); 0 = none.
+    meetingRoomCreditHours: z.number().int("Credits are whole hours.").min(0).max(200),
+  })
+  .partial();
 
 export const companyIdParamSchema = z.object({
   companyId: objectId,

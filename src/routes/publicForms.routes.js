@@ -7,10 +7,13 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { asyncHandler } from "../utils/asyncHandler.js";
+import { env } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
 import {
   allowedOriginsFor,
   findPublicForm,
+  findPublicFormBySlug,
+  publicFormDefinition,
   isHoneypot,
   normalizeOrigin,
   processFormSubmission,
@@ -56,6 +59,19 @@ function redirectBack(req, res, allowed, params) {
   res.redirect(303, url.toString());
   return true;
 }
+
+// Form definition for the WordPress shortcode: fields, consent, design, public key, submit URL.
+// No auth (the public key is already in the embed code). 404 for unknown or inactive forms.
+router.get(
+  "/:slug",
+  asyncHandler(async (req, res) => {
+    const form = await findPublicFormBySlug(req.params.slug);
+    if (!form) throw new AppError("Form not found.", 404, "FORM_NOT_FOUND");
+    const apiBase = env.PUBLIC_API_URL || `${req.protocol}://${req.get("host")}`;
+    res.set("Cache-Control", "public, max-age=60");
+    res.json({ success: true, data: publicFormDefinition(form, apiBase) });
+  }),
+);
 
 router.post(
   "/:slug",

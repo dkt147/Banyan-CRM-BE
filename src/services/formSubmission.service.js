@@ -27,6 +27,7 @@ import { publicEnquirySchema } from "../validators/publicEnquiry.validators.js";
 import { findOrCreateContact } from "./contactMatching.service.js";
 import { sendWorkspaceEmail } from "./mail.service.js";
 import { createPublicEnquiry, endOfDayInTimeZone, getIntakeContext } from "./publicEnquiry.service.js";
+import { flodeskConsent, queueFlodeskForSubmission } from "./flodesk.service.js";
 
 const HONEYPOT_KEYS = ["website", "_honeypot", "website_confirm"];
 const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -49,6 +50,36 @@ export function allowedOriginsFor(form) {
 export async function findPublicForm(slug, publicKey) {
   if (!slug || !publicKey || typeof publicKey !== "string") return null;
   return Form.findOne({ slug: String(slug).toLowerCase(), publicKey, isActive: true });
+}
+
+/**
+ * Active form by slug for the public definition (GET /public/forms/:slug). Slugs are unique per
+ * workspace; with several matches the website's intake workspace wins.
+ */
+export async function findPublicFormBySlug(slug) {
+  const clean = String(slug || "").toLowerCase();
+  if (!/^[a-z0-9-]{1,120}$/.test(clean)) return null;
+  const forms = await Form.find({ slug: clean, isActive: true }).limit(5);
+  if (forms.length <= 1) return forms[0] || null;
+  const intake = await getIntakeContext().catch(() => null);
+  return forms.find((f) => intake && String(f.workspaceId) === String(intake.workspace._id)) || forms[0];
+}
+
+/** What the website shortcode needs to render the form. */
+export function publicFormDefinition(form, apiBase) {
+  return {
+    slug: form.slug,
+    name: form.name,
+    isActive: Boolean(form.isActive),
+    fields: (form.fields || []).map((f) => ({
+      key: f.key, label: f.label, type: f.type, required: Boolean(f.required), options: f.options || [],
+      ...(f.placeholder ? { placeholder: f.placeholder } : {}),
+    })),
+    consentText: form.consentText || null,
+    design: form.design || null,
+    publicKey: form.publicKey,
+    submitUrl: `${apiBase}/api/v1/public/forms/${form.slug}`,
+  };
 }
 
 /** Validate submitted values against the form's fields. Returns { values, mapped } or throws 400. */
@@ -102,8 +133,24 @@ function splitName(mapped) {
   return { firstName: firstName || "Guest", lastName };
 }
 
-async function applyContactExtras(contact, form, mapped, consent, meta) {
-  contact.tags = normalizeTags([...(contact.tags || []), ...(form.tagsToApply || []), "form_submission"]).slice(0, 30);
+const YES_RX = /^(yes|y|true|on|1)$/i;
+/** True when a newsletterOptIn answer means Yes. */
+export const optedIn = (value) => (Array.isArray(value) ? value : [value]).some((v) => YES_RX.test(String(v ?? "").trim()));
+
+async function applyContactExtras(contact, form, mapped, consent, meta, { isNew }) {
+  const newsletter = "newsletterOptIn" in mapped && optedIn(mapped.newsletterOptIn);
+  contact.tags = normalizeTags([
+    ...(contact.tags || []),
+    ...(form.tagsToApply || []),
+    "form_submission",
+    ...(newsletter ? ["newsletter"] : []),
+    ...(form.type === "walk_in" ? ["walk_in"] : []),
+  ]).slice(0, 30);
+  // "How did you hear about us?": first known origin only. A contact made by this submission
+  // gets the answer instead of the generic "form"/"website".
+  const heard = String(mapped.source || "").trim().slice(0, 100);
+  if (heard && (!contact.source || isNew)) contact.source = heard;
+  else if (!heard && isNew && form.type === "walk_in") contact.source = "walk-in";
   if (mapped.notes && !contact.notes) contact.notes = mapped.notes.slice(0, 5000);
   if (mapped.company && !contact.companyId) {
     // Link only to an existing company with the same name; never create companies from public input.
@@ -112,7 +159,7 @@ async function applyContactExtras(contact, form, mapped, consent, meta) {
     else contact.metadata = { ...(contact.metadata || {}), companyName: mapped.company.slice(0, 200) };
   }
   if (mapped.interests?.length) contact.metadata = { ...(contact.metadata || {}), interests: mapped.interests };
-  if (consent) {
+  if (consent || newsletter) {
     contact.marketingConsentAt = new Date();
     contact.consentSource = form.slug;
     contact.consentText = form.consentText || null;
@@ -156,7 +203,14 @@ export async function processFormSubmission(form, body, meta = {}) {
   const submission = await FormSubmission.create({
     workspaceId: form.workspaceId,
     formId: form._id,
-    payload: { values, consent },
+    payload: {
+      values,
+      consent,
+      // Copies used by reports (§4): services ticked and "How did you hear about us?".
+      interests: (Array.isArray(mapped.interests) ? mapped.interests : [mapped.interests]).filter(Boolean),
+      ...(mapped.source ? { source: String(mapped.source).slice(0, 100) } : {}),
+      ...("newsletterOptIn" in mapped ? { newsletterOptIn: optedIn(mapped.newsletterOptIn) } : {}),
+    },
     status: "received",
     sourceUrl: meta.sourceUrl ? String(meta.sourceUrl).slice(0, 500) : undefined,
     ip: meta.ip,
@@ -168,17 +222,27 @@ export async function processFormSubmission(form, body, meta = {}) {
     let contact;
     let dealIds = [];
 
-    // Copied website enquiry form: identical routing to POST /public/enquiries.
+    // Copied website enquiry form: identical routing to POST /public/enquiries (exactly one service).
+    // Walk-in forms (19 Nov follow-up): several services in one enquiry (one deal per pipeline), the
+    // follow-up task only when createTask is set; no service ticked -> contact only, no deal.
     const interestsField = (form.fields || []).find((f) => f.mapTo === "interests");
-    const intake = interestsField && !form.pipelineId ? await getIntakeContext().catch(() => null) : null;
+    const interests = (Array.isArray(mapped.interests) ? mapped.interests : [mapped.interests]).filter(Boolean);
+    const isWalkIn = form.type === "walk_in";
+    const routed = interestsField && !form.pipelineId && !(isWalkIn && !interests.length);
+    const intake = routed ? await getIntakeContext().catch(() => null) : null;
     if (intake && String(intake.workspace._id) === String(form.workspaceId)) {
       const { firstName, lastName } = splitName(mapped);
       const payload = publicEnquirySchema.parse({
         firstName, lastName: lastName || "-", email: mapped.email, phone: mapped.phone || "",
-        interests: Array.isArray(mapped.interests) ? mapped.interests : [mapped.interests].filter(Boolean),
+        interests,
         notes: mapped.notes || "",
       });
-      const result = await createPublicEnquiry(payload);
+      const result = await createPublicEnquiry(
+        payload,
+        isWalkIn
+          ? { allowMultiple: true, label: "Walk-in enquiry", tag: "walk_in", createTask: Boolean(form.createTask), sourceForm: `CRM form: ${form.name}`, origin: "walk_in" }
+          : {},
+      );
       contact = await Contact.findById(result.contactId);
       dealIds = result.deals.map((d) => d.id);
     } else {
@@ -241,14 +305,22 @@ export async function processFormSubmission(form, body, meta = {}) {
       }).catch((error) => console.error("[forms] activity failed:", error.message));
     }
 
-    await applyContactExtras(contact, form, mapped, consent, meta);
+    // Made by this submission: contacts are created after the submission record.
+    const isNew = Boolean(contact.createdAt && contact.createdAt.getTime() >= submission.createdAt.getTime());
+    await applyContactExtras(contact, form, mapped, consent, meta, { isNew });
     await notifyStaff(form, owner, contact, values, dealIds[0]);
     submission.status = "processed";
     submission.contactId = contact._id;
     if (dealIds[0]) submission.dealId = dealIds[0];
     submission.processedAt = new Date();
+    if (form.flodesk?.enabled) {
+      const d = flodeskConsent(form, { values, consent });
+      submission.flodesk = { status: d.ok ? "pending" : "skipped", segments: [], reason: d.ok ? null : d.reason, at: new Date() };
+    }
     await submission.save();
-    return { submissionId: String(submission._id), contactId: String(contact._id), dealIds };
+    // Newsletter sign-up runs in the background; the visitor never waits for Flodesk.
+    const flodeskDone = queueFlodeskForSubmission(form, submission, { values, consent, mapped, contact });
+    return { submissionId: String(submission._id), contactId: String(contact._id), dealIds, flodeskDone };
   } catch (error) {
     submission.status = "failed";
     submission.error = String(error.message).slice(0, 500);

@@ -21,6 +21,8 @@ export const TAG_CATALOGUE = [
   { key: "email_lead", group: "source", label: "Email lead", description: "First contact came by email.", automatic: true },
   { key: "whatsapp_lead", group: "source", label: "WhatsApp lead", description: "First contact came by WhatsApp.", automatic: true },
   { key: "form_submission", group: "source", label: "Form submission", description: "Sent a CRM form.", automatic: true },
+  { key: "newsletter", group: "source", label: "Newsletter", description: "Signed up for the newsletter (also added to Flodesk).", automatic: true },
+  { key: "walk_in", group: "source", label: "Walk-in", description: "Filled in the walk-in form at reception.", automatic: true },
 ];
 
 /** "Active Member" / "active-member" / " ACTIVE member " -> "active_member". */

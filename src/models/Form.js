@@ -21,6 +21,14 @@ const schema = new mongoose.Schema(
     allowedOrigins: { type: [String], default: [] },
     isActive: { type: Boolean, default: true, index: true },
     settings: { type: mongoose.Schema.Types.Mixed, default: {} },
+    // Look of the form on the website (19 Nov): { title, intro, buttonText, successMessage, layout,
+    // imageUrl, headingFont, bodyFont, colors: { text, button, buttonHover, buttonText, background, page } }.
+    // null on older forms; the CRM merges it over the Banyan defaults.
+    design: { type: mongoose.Schema.Types.Mixed, default: null },
+    // Add consenting submitters to Flodesk segments by interest (services/flodesk.service.js).
+    flodesk: { enabled: { type: Boolean, default: false } },
+    // WordPress page made for this form (POST /forms/:id/page): { url, path, wpPageId, status, publishedAt, error }.
+    page: { type: mongoose.Schema.Types.Mixed, default: null },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },

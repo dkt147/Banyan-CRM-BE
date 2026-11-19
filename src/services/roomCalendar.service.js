@@ -109,16 +109,22 @@ export async function ownedEventWrite(workspaceId, calendarId, eventId, ref, op,
 }
 
 /* ---------- event content ---------- */
+export const TEST_PREFIX = "TEST – ";
+
 export function eventBodyFor(booking) {
   const wp = booking.metadata?.wp || {};
   const c = wp.customer || {};
   const name = [c.firstName, c.lastName].filter(Boolean).join(" ") || c.email || "Guest";
   const room = wp.roomName || booking.resourceName || "Room";
+  // Stripe test-mode bookings are labelled so they can't be mistaken for real ones in a shared calendar.
+  const isTest = wp.status !== "blocked" && wp.payment?.mode === "test";
   const summary =
-    wp.status === "blocked"
+    (isTest ? TEST_PREFIX : "") +
+    (wp.status === "blocked"
       ? `${room} – Blocked${c.notes ? `: ${c.notes}` : ""}`
-      : `${wp.status === "pending" ? "Awaiting payment – " : ""}${room} – ${name} (${wp.ref})`;
+      : `${wp.status === "pending" ? "Awaiting payment – " : ""}${room} – ${name} (${wp.ref})`);
   const description = [
+    isTest ? "Stripe TEST mode – not a real booking." : null,
     `Ref: ${wp.ref}`,
     wp.status !== "blocked" && c.email ? `Email: ${c.email}` : null,
     wp.status !== "blocked" && c.phone ? `Phone: ${c.phone}` : null,
@@ -204,7 +210,8 @@ export function syncBookingToRoomCalendar(bookingId) {
         await ownedEventWrite(ws, prev.calendarId, prev.eventId, ref, "delete");
       if (want.present) {
         const r = await upsertOwnedEvent(ws, want.calendarId, ref, eventBodyFor(booking));
-        Object.assign(state, { calendarId: want.calendarId, eventId: r.eventId, action: r.action });
+        // summary: lets relabelTestEvents() find events pushed with an older title.
+        Object.assign(state, { calendarId: want.calendarId, eventId: r.eventId, action: r.action, summary: eventBodyFor(booking).summary.slice(0, 250) });
       } else state.action = prev.eventId ? "removed" : "none";
     } catch (error) {
       Object.assign(state, { calendarId: prev.calendarId || null, eventId: prev.eventId || null, error: error.message });
@@ -213,6 +220,27 @@ export function syncBookingToRoomCalendar(bookingId) {
     await Booking.updateOne({ _id: booking._id }, { $set: { "metadata.roomCalendar": state } });
     return state;
   });
+}
+
+/**
+ * Once at startup: re-patch our own events for Stripe test-mode bookings that were pushed before
+ * they were labelled "TEST – ". Only events the CRM created (ownedEventWrite checks), no invites.
+ */
+export async function relabelTestEvents() {
+  const rows = await Booking.find({
+    externalRef: { $type: "string" },
+    "metadata.roomCalendar.eventId": { $type: "string" },
+    "metadata.wp.payment.mode": "test",
+    "metadata.wp.status": { $ne: "blocked" },
+    "metadata.roomCalendar.summary": { $not: /^TEST – / },
+  }).select("_id").limit(500).lean();
+  let done = 0;
+  for (const b of rows) {
+    const state = await syncBookingToRoomCalendar(b._id).catch((e) => ({ error: e.message }));
+    if (!state?.error && !state?.skipped) done++;
+  }
+  if (rows.length) console.log(`[room-calendar] relabelled ${done}/${rows.length} test booking event(s)`);
+  return { found: rows.length, relabelled: done };
 }
 
 /** Fire-and-forget hook used by upsertWpBooking (never blocks or fails the webhook). */

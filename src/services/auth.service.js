@@ -11,6 +11,8 @@ import {
   verifyRefreshToken,
 } from "../utils/tokens.js";
 
+const ROTATION_GRACE_MS = 30 * 1000;
+
 function publicUser(user) {
   const o = user.toObject();
   delete o.passwordHash;
@@ -68,7 +70,7 @@ export async function issueTokens(user, meta = {}) {
   const tokenId = newTokenId(),
     refreshToken = signRefreshToken(user, tokenId);
   const decoded = verifyRefreshToken(refreshToken);
-  await RefreshToken.create({
+  const doc = await RefreshToken.create({
     workspaceId: user.workspaceId,
     userId: user._id,
     tokenHash: hashToken(refreshToken),
@@ -76,7 +78,7 @@ export async function issueTokens(user, meta = {}) {
     userAgent: meta.userAgent || null,
     ipAddress: meta.ipAddress || null,
   });
-  return { accessToken: signAccessToken(user), refreshToken };
+  return { accessToken: signAccessToken(user), refreshToken, refreshTokenId: doc._id };
 }
 export async function rotateRefreshToken(raw, meta = {}) {
   if (!raw)
@@ -84,11 +86,14 @@ export async function rotateRefreshToken(raw, meta = {}) {
   const payload = verifyRefreshToken(raw);
   if (payload.type !== "refresh")
     throw new AppError("Invalid refresh token.", 401, "INVALID_REFRESH_TOKEN");
-  const existing = await RefreshToken.findOne({
-    tokenHash: hashToken(raw),
-    revokedAt: null,
-  });
-  if (!existing || existing.expiresAt <= new Date())
+  const existing = await RefreshToken.findOne({ tokenHash: hashToken(raw) });
+  // Rotation grace: two tabs can refresh with the same token at once. A token rotated in the last
+  // ROTATION_GRACE_MS (not logged out: replacedByTokenId is set) still gets a fresh pair.
+  const inGrace =
+    existing?.revokedAt &&
+    existing.replacedByTokenId &&
+    Date.now() - existing.revokedAt.getTime() <= ROTATION_GRACE_MS;
+  if (!existing || existing.expiresAt <= new Date() || (existing.revokedAt && !inGrace))
     throw new AppError(
       "Refresh token is invalid or expired.",
       401,
@@ -97,9 +102,12 @@ export async function rotateRefreshToken(raw, meta = {}) {
   const user = await User.findById(payload.sub).select("+passwordHash");
   if (!user || !user.isActive)
     throw new AppError("User account is inactive.", 401, "USER_INACTIVE");
-  existing.revokedAt = new Date();
-  await existing.save();
   const next = await issueTokens(user, meta);
+  if (!existing.revokedAt) {
+    existing.revokedAt = new Date();
+    existing.replacedByTokenId = next.refreshTokenId;
+    await existing.save();
+  }
   return { user: publicUser(user), ...next };
 }
 export async function logout(raw) {

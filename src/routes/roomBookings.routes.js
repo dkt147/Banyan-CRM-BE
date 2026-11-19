@@ -7,6 +7,8 @@
  * (public endpoints), using GET /config for the rules, then calls POST /sync.
  */
 import { Router } from "express";
+import { z } from "zod";
+import { createCreditBooking, refundCreditsForBooking } from "../services/credits.service.js";
 import { env } from "../config/env.js";
 import { requireAuth, requirePermission } from "../middleware/auth.middleware.js";
 import { Booking } from "../models/Booking.js";
@@ -191,7 +193,33 @@ r.post(
     const refund = req.body?.refund === true;
     if (refund && !can(req.user, "bookings.refund")) throw new AppError("Only admins can refund bookings.", 403, "FORBIDDEN");
     const data = await cancelWpBooking(req.params.ref, { refund, reason: req.body?.reason, staffName: req.user.name || req.user.email });
+    // Credit bookings get their hours back (also done by the sync; this covers a failed sync).
+    await refundCreditsForBooking(req.workspaceId, String(req.params.ref).toUpperCase(), `${req.user.name || "Staff"} (CRM)`).catch(() => {});
     res.json({ success: true, data });
+  }),
+);
+
+/* ---------- Meeting room credits (19 Nov, §5) ---------- */
+const creditBookingSchema = z.object({
+  room: z.enum(["small", "medium", "library"]),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be YYYY-MM-DD."),
+  // 10 or "10:00" (whole hours, Hong Kong time)
+  start: z.union([z.number(), z.string().regex(/^\d{1,2}(:00)?$/,"start must be a whole hour like 10:00.")]).transform((v) => Number(String(v).split(":")[0])),
+  hours: z.coerce.number().int().min(1).max(9),
+  contactId: z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid contact."),
+  notes: z.string().trim().max(800).optional().default(""),
+}).refine((b) => b.start >= WP_BOOKING_RULES.open && b.start + b.hours <= WP_BOOKING_RULES.close, {
+  message: `Bookings run from ${WP_BOOKING_RULES.open}:00 to ${WP_BOOKING_RULES.close}:00.`, path: ["start"],
+});
+
+// Staff book for a member's company using its monthly credits. 409 INSUFFICIENT_CREDITS { remaining }.
+r.post(
+  "/credit-booking",
+  requirePermission("bookings.write"),
+  asyncHandler(async (req, res) => {
+    const input = creditBookingSchema.parse(req.body || {});
+    const data = await createCreditBooking(req.workspaceId, input, req.user);
+    res.status(201).json({ success: true, data });
   }),
 );
 

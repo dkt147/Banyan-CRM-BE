@@ -467,7 +467,7 @@ test("#7 room calendars: settings, push without guests or emails, idempotent, ca
   assert.equal(state.error, null, state.error);
   const ev = cal(LIB).get(eventIdFor("BNY-NEW001"));
   assert.ok(ev, "event created with the deterministic id");
-  assert.equal(ev.summary, "The Library (15 people (depending on layout)) – Jane Chan (BNY-NEW001)");
+  assert.equal(ev.summary, "TEST – The Library (15 people (depending on layout)) – Jane Chan (BNY-NEW001)", "Stripe test-mode booking is labelled");
   assert.equal(ev.attendees, undefined, "no guests");
   assert.equal(ev.start.timeZone, "Asia/Hong_Kong");
   assert.deepEqual(ev.extendedProperties.private, { banyanRef: "BNY-NEW001", banyanSource: "crm-room-booking" });
