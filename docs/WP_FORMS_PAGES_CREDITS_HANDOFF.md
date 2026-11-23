@@ -20,7 +20,32 @@
 - Don't change existing bookings. Test bookings and pages must have a title starting "TEST".
 - Stripe stays on test keys until launch.
 
-All new routes use the same CRM-to-WordPress authentication as the existing cancel endpoint.
+All new routes use the same CRM-to-WordPress authentication as the existing cancel endpoint: the `X-Banyan-Token` header.
+
+**The CRM side is already live** (backend commit `c5e235b`, 19 Nov 2026). Right now both routes below return WordPress's `404 rest_no_route`, which the CRM shows to staff as "website update pending". As soon as the routes exist, the CRM buttons work, with no CRM change needed.
+
+### Exact requests the CRM sends
+
+All requests carry `X-Banyan-Token: <token>`, `Content-Type: application/json` and `Accept: application/json`. The timeout is 30 seconds.
+
+| CRM action | Request | Body |
+|---|---|---|
+| Staff click "Create page" or "Update page" on a form | `POST {WP_API}/crm-pages` | `{ "form_slug": "walk-in", "path": "forms/walk-in", "title": "Welcome to Banyan Workspace", "wp_page_id": null }`. On "Update page", `wp_page_id` is the id you returned before. |
+| Staff click "Remove page" | `DELETE {WP_API}/crm-pages/{id}` | none |
+| Staff choose "Book with credits" | `POST {WP_API}/bookings/credit` | `{ "room": "small", "date": "2026-12-03", "start": "10:00", "hours": 2, "first_name", "last_name", "email", "phone", "notes": "Booked via CRM by Felicia – …", "company": "Acme Ltd", "booked_by": "Felicia (CRM)", "credit_ref": "CR-1A2B3C4D5E" }` |
+
+`room` is `small`, `medium` (the 14-person room) or `library`.
+
+**How the CRM reads your responses:**
+
+| Response | CRM handling |
+|---|---|
+| `crm-pages` success | Reads `id`, `url` and `status` |
+| `409` (any route) | Shows your `message` to staff |
+| `400` (any route) | Passed through with your `message` |
+| `404` on `DELETE` | Counts as already removed |
+| `bookings/credit` success | Reads the booking from `{ booking: { ref, … } }` (the `GET /bookings/{ref}` shape), from `{ bookings: [ … ] }`, or from `{ data: … }`. It **must** include `booking.ref`. |
+| Other errors | Shown as "WordPress returned …" |
 
 ---
 
