@@ -60,7 +60,7 @@ r.get("/:id/submissions", asyncHandler(async (req, res) => {
   const filter = { workspaceId: req.workspaceId, formId: form._id, ...(req.query.status ? { status: String(req.query.status) } : {}) };
   const [items, total] = await Promise.all([
     FormSubmission.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit)
-      .populate("contactId", "firstName lastName email").populate("dealId", "title").select("-ip -userAgent").lean(),
+      .populate("contactId", "firstName lastName email").populate("dealId", "title").populate("dealIds", "title").select("-ip -userAgent").lean(),
     FormSubmission.countDocuments(filter),
   ]);
   res.json({ success: true, data: { items, pagination: { page, limit, total, pages: Math.ceil(total / limit) } } });

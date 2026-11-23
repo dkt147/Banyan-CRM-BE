@@ -6,6 +6,8 @@ const schema = new mongoose.Schema(
     // Set once the submission is matched to (or creates) a contact.
     contactId: { type: mongoose.Schema.Types.ObjectId, ref: "Contact", index: true },
     dealId: { type: mongoose.Schema.Types.ObjectId, ref: "Deal", index: true },
+    // Every deal the submission made (a walk-in with services in two pipelines makes two).
+    dealIds: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Deal" }], default: undefined },
     bookingId: { type: mongoose.Schema.Types.ObjectId, ref: "Booking" },
     payload: { type: mongoose.Schema.Types.Mixed, default: {} },
     status: {

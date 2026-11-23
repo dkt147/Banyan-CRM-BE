@@ -137,10 +137,16 @@ test("D1: website holds match contacts by email first, then phone, else create",
   assert.equal(String(byEmail.json.data.contactId), ids.contact);
   assert.equal(byEmail.json.data.metadata.contactMatch, "email");
 
-  const byPhone = await api("/calendar/hold", { method: "POST", body: { ...mk(11), contact: { email: "other@example.com", phone: "(852) 91234567" } } });
+  // Phone matches only when no email is given (or the contact has none): a different email is a
+  // different person even with the same phone (E2E 23 Nov, F3).
+  const byPhone = await api("/calendar/hold", { method: "POST", body: { ...mk(11), contact: { phone: "(852) 91234567" } } });
   assert.equal(byPhone.status, 201, JSON.stringify(byPhone.json));
   assert.equal(String(byPhone.json.data.contactId), ids.contact);
   assert.equal(byPhone.json.data.metadata.contactMatch, "phone");
+  const otherEmail = await api("/calendar/hold", { method: "POST", body: { ...mk(12), contact: { email: "other@example.com", phone: "(852) 91234567" } } });
+  assert.equal(otherEmail.status, 201, JSON.stringify(otherEmail.json));
+  assert.notEqual(String(otherEmail.json.data.contactId), ids.contact);
+  assert.equal(otherEmail.json.data.metadata.contactMatch, "created");
 
   const fresh = await api("/calendar/hold", { method: "POST", body: { ...mk(13), contact: { firstName: "New", lastName: "Guest", email: "new.guest@example.com" } } });
   assert.equal(fresh.status, 201);

@@ -31,6 +31,36 @@ const SERVICE_ROUTING = {
     pipelineKey: "transactional",
     productType: "day_pass_package",
   },
+  coworking: {
+    label: "Coworking Desks",
+    pipelineKey: "membership",
+    productType: "membership",
+  },
+  "dedicated desk": {
+    label: "Coworking Desks",
+    pipelineKey: "membership",
+    productType: "membership",
+  },
+  "private office": {
+    label: "Serviced Offices",
+    pipelineKey: "private-office",
+    productType: "private_office",
+  },
+  "event space / venue hire": {
+    label: "Event Venue",
+    pipelineKey: "venue-hire",
+    productType: "venue_hire",
+  },
+  "venue hire": {
+    label: "Event Venue",
+    pipelineKey: "venue-hire",
+    productType: "venue_hire",
+  },
+  "podcast services": {
+    label: "Podcast Studio",
+    pipelineKey: "venue-hire",
+    productType: "studio",
+  },
   "coworking desk": {
     label: "Coworking Desks",
     pipelineKey: "membership",
@@ -149,6 +179,9 @@ function normalizeKey(value) {
     .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ");
 }
+
+/** True when a service name routes to a pipeline (e.g. "Coworking Desks", "coworking"). */
+export const isKnownService = (raw) => Boolean(SERVICE_ROUTING[normalizeKey(raw)]);
 
 function resolveServices(input, { allowMultiple = false } = {}) {
   if (!allowMultiple && Array.isArray(input) && input.length > 1) {
@@ -388,7 +421,7 @@ export async function createPublicEnquiry(payload, options = {}) {
       value: 0,
       currency: workspace.currency || "HKD",
       productType: productTypeForGroup(groupServices, pipelineKey),
-      source: "website",
+      source: options.source || "website",
       ownerId: leadOwnerId,
       status: "open",
       description: payload.notes || `${label} for ${serviceLabel}.`,
@@ -421,7 +454,7 @@ export async function createPublicEnquiry(payload, options = {}) {
           `Interested in: ${deal.metadata?.interestsForPipeline?.join(", ") || "Banyan Workspace services"}`,
         occurredAt: receivedAt,
         metadata: {
-          source: "website",
+          source: options.source || "website",
           interests: deal.metadata?.interestsForPipeline || [],
         },
       });

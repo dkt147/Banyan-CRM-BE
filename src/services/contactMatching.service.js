@@ -14,7 +14,13 @@ export async function findContactByEmailOrPhone(workspaceId, { email, phone } = 
   }
   const digits = normalizePhone(phone);
   if (digits) {
-    const contact = await Contact.findOne({ workspaceId, phoneNormalized: digits }).sort({ isArchived: 1, createdAt: 1 });
+    // With an email given, a phone match only counts for a contact with no email (or the same one):
+    // two people can share a phone (office line, test number), but a different email is a different person.
+    const contact = await Contact.findOne({
+      workspaceId,
+      phoneNormalized: digits,
+      ...(cleanEmail ? { $or: [{ email: null }, { email: "" }, { email: { $exists: false } }] } : {}),
+    }).sort({ isArchived: 1, createdAt: 1 });
     if (contact) return { contact, matchedBy: "phone" };
   }
   return { contact: null, matchedBy: null };

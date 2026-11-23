@@ -622,6 +622,37 @@ export async function runWpBookingSyncJob() {
 }
 
 /* ---------- API row shape for the CRM frontend ---------- */
+function channelLabel(wp) {
+  const base = wp.payment?.method === "credits" ? "Meeting room credits" : wp.channel === "admin" ? "WP Admin" : "Website checkout";
+  return wp.viaCrm ? `${base} · booked via CRM` : base;
+}
+
+const CALENDAR_REASONS = {
+  settings_not_saved: "Room calendars aren't set up",
+  no_calendar_for_room: "No calendar set for this room",
+  before_push_start: "Booked before the room calendar was set up",
+  partner_block: "Partner's own calendar event",
+  past: "In the past",
+  google_not_connected: "Google isn't connected",
+  status_cancelled: "Cancelled",
+  status_expired: "Hold expired",
+  status_pending: "Awaiting payment",
+  status_error: "Payment failed",
+};
+/**
+ * googleCalendar.status: "in_calendar" | "removed" | "not_in_calendar" | "error", and a label for the
+ * side panel. retry: true only when the last update failed.
+ */
+function calendarStatus(rc, wp) {
+  // "Meeting Room (5 to 6 people)" -> "Meeting Room calendar"
+  const room = `${String(wp.roomName || "room").replace(/\s*\(.*$/, "")} calendar`;
+  const why = CALENDAR_REASONS[rc.reason] || null;
+  if (rc.error) return { status: "error", label: `Calendar update failed: ${rc.error}`, retry: true };
+  if (rc.eventId) return { status: "in_calendar", label: `In ${room}`, retry: false };
+  if (rc.action === "removed") return { status: "removed", label: `Removed from ${room}${why ? ` (${why.toLowerCase()})` : ""}`, retry: false };
+  return { status: "not_in_calendar", label: `Not in ${room}${why ? `: ${why.toLowerCase()}` : ""}`, retry: false };
+}
+
 export function toRoomBookingRow(b, now = new Date()) {
   const wp = b.metadata?.wp || {};
   const holdLapsed = wp.status === "pending" && b.holdExpiresAt && new Date(b.holdExpiresAt) <= now;
@@ -653,8 +684,19 @@ export function toRoomBookingRow(b, now = new Date()) {
       ? { id: String(contact._id), firstName: contact.firstName, lastName: contact.lastName, email: contact.email, phone: contact.phone }
       : b.contactId ? { id: String(b.contactId) } : null,
     payment: wp.payment
-      ? { ...wp.payment, isTest: wp.payment.mode === "test", amountLabel: wp.payment.amount != null ? money(wp.payment.amount) : null, stripeUrl: stripePaymentUrl(wp.payment) }
+      ? {
+          ...wp.payment,
+          isTest: wp.payment.mode === "test",
+          // What the Amount column shows: "HK$250" or "Meeting room credits (2 h)".
+          amountLabel:
+            wp.payment.method === "credits"
+              ? `Meeting room credits (${wp.hours} h)`
+              : wp.payment.amount != null ? money(wp.payment.amount) : null,
+          stripeUrl: wp.payment.method === "credits" ? null : stripePaymentUrl(wp.payment),
+        }
       : null,
+    // "Website checkout", "WP Admin", "Website checkout · booked via CRM", "Meeting room credits · booked via CRM".
+    channelLabel: channelLabel(wp),
     // Plugin 1.2.0: set when the booking was cancelled (WP Admin or the CRM).
     cancelReason: wp.cancelReason || null,
     cancelledBy: wp.cancelledBy || null,
@@ -662,7 +704,7 @@ export function toRoomBookingRow(b, now = new Date()) {
     createdAt: wp.createdAt,
     syncedAt: wp.lastSyncedAt || b.updatedAt,
     // Copy in the shared Google room calendar: { calendarId, eventId, action, syncedAt, error, reason }.
-    googleCalendar: b.metadata?.roomCalendar || null,
+    googleCalendar: b.metadata?.roomCalendar ? { ...b.metadata.roomCalendar, ...calendarStatus(b.metadata.roomCalendar, wp) } : null,
   };
 }
 
@@ -722,7 +764,7 @@ export async function buildRoomBookingTimeline(b) {
   // Google Calendar copy (latest state only)
   const cal = b.metadata?.roomCalendar;
   if (cal?.syncedAt) {
-    const room = `${(wp.roomName || "room").replace(/\s*room$/i, "")} room calendar`;
+    const room = `${String(wp.roomName || "room").replace(/\s*\(.*$/, "")} calendar`;
     if (cal.error) add(cal.syncedAt, `Calendar update failed: ${cal.error}`);
     else if (cal.action === "inserted") add(cal.syncedAt, `Added to ${room}`);
     else if (cal.action === "updated") add(cal.syncedAt, `Updated in ${room}`);

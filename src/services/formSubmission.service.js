@@ -26,7 +26,7 @@ import { normalizeTags } from "../utils/contactTags.js";
 import { publicEnquirySchema } from "../validators/publicEnquiry.validators.js";
 import { findOrCreateContact } from "./contactMatching.service.js";
 import { sendWorkspaceEmail } from "./mail.service.js";
-import { createPublicEnquiry, endOfDayInTimeZone, getIntakeContext } from "./publicEnquiry.service.js";
+import { createPublicEnquiry, endOfDayInTimeZone, getIntakeContext, isKnownService } from "./publicEnquiry.service.js";
 import { flodeskConsent, queueFlodeskForSubmission } from "./flodesk.service.js";
 
 const HONEYPOT_KEYS = ["website", "_honeypot", "website_confirm"];
@@ -226,9 +226,14 @@ export async function processFormSubmission(form, body, meta = {}) {
     // Walk-in forms (19 Nov follow-up): several services in one enquiry (one deal per pipeline), the
     // follow-up task only when createTask is set; no service ticked -> contact only, no deal.
     const interestsField = (form.fields || []).find((f) => f.mapTo === "interests");
-    const interests = (Array.isArray(mapped.interests) ? mapped.interests : [mapped.interests]).filter(Boolean);
     const isWalkIn = form.type === "walk_in";
-    const routed = interestsField && !form.pipelineId && !(isWalkIn && !interests.length);
+    // Walk-ins route only the services the CRM knows; any other option stays on the submission.
+    const interests = (Array.isArray(mapped.interests) ? mapped.interests : [mapped.interests])
+      .filter(Boolean)
+      .filter((i) => !isWalkIn || isKnownService(i));
+    // Only enquiry and walk-in forms make enquiries; newsletter and contact forms keep interests on the
+    // contact (and use them for Flodesk segments) without creating deals.
+    const routed = interestsField && !form.pipelineId && ["enquiry", "walk_in"].includes(form.type) && !(isWalkIn && !interests.length);
     const intake = routed ? await getIntakeContext().catch(() => null) : null;
     if (intake && String(intake.workspace._id) === String(form.workspaceId)) {
       const { firstName, lastName } = splitName(mapped);
@@ -240,7 +245,7 @@ export async function processFormSubmission(form, body, meta = {}) {
       const result = await createPublicEnquiry(
         payload,
         isWalkIn
-          ? { allowMultiple: true, label: "Walk-in enquiry", tag: "walk_in", createTask: Boolean(form.createTask), sourceForm: `CRM form: ${form.name}`, origin: "walk_in" }
+          ? { allowMultiple: true, label: "Walk-in enquiry", tag: "walk_in", createTask: Boolean(form.createTask), sourceForm: `CRM form: ${form.name}`, origin: "walk_in", source: "walk_in" }
           : {},
       );
       contact = await Contact.findById(result.contactId);
@@ -312,6 +317,7 @@ export async function processFormSubmission(form, body, meta = {}) {
     submission.status = "processed";
     submission.contactId = contact._id;
     if (dealIds[0]) submission.dealId = dealIds[0];
+    if (dealIds.length) submission.dealIds = dealIds;
     submission.processedAt = new Date();
     if (form.flodesk?.enabled) {
       const d = flodeskConsent(form, { values, consent });

@@ -495,3 +495,76 @@ test("§6 company loyalty: placeholder tiers, 12-month spend, sorted list, tier 
   assert.equal(one.json.data.monthly.find((m) => m.month === "2026-10").spend, 12580);
   assert.equal(one.json.data.monthly.reduce((s, m) => s + m.spend, 0), one.json.data.spend12m);
 });
+
+/* ---------- E2E report fixes (23 Nov) ---------- */
+test("E2E F1/F4/F9: row labels for credits, channel and calendar state", async () => {
+  const { toRoomBookingRow } = await import("../src/services/wpRoomBooking.service.js");
+  const row = (wp, roomCalendar) => toRoomBookingRow({ _id: "x", externalRef: wp.ref, startAt: new Date(), endAt: new Date(), metadata: { wp, roomCalendar } });
+  const base = { ref: "BNY-L1", status: "cancelled", roomName: "Meeting Room (5 to 6 people)", hours: 1, viaCrm: true, channel: "admin" };
+  const credits = row({ ...base, payment: { method: "credits", amount: 0, mode: "test" } }, { eventId: null, action: "removed", reason: "status_cancelled", error: null });
+  assert.equal(credits.payment.amountLabel, "Meeting room credits (1 h)");
+  assert.equal(credits.payment.stripeUrl, null);
+  assert.equal(credits.channelLabel, "Meeting room credits · booked via CRM");
+  assert.deepEqual(
+    [credits.googleCalendar.status, credits.googleCalendar.label, credits.googleCalendar.retry],
+    ["removed", "Removed from Meeting Room calendar (cancelled)", false],
+  );
+  const web = row({ ...base, status: "paid", channel: "web", payment: { method: "stripe", amount: 250, mode: "live" } }, { eventId: "b123", calendarId: "c", action: "inserted" });
+  assert.equal(web.payment.amountLabel, "HK$250");
+  assert.equal(web.channelLabel, "Website checkout · booked via CRM");
+  assert.equal(web.googleCalendar.label, "In Meeting Room calendar");
+  const failed = row({ ...base, status: "paid", payment: { method: "stripe", amount: 250 } }, { eventId: null, error: "403 Forbidden" });
+  assert.deepEqual([failed.googleCalendar.status, failed.googleCalendar.retry], ["error", true]);
+  assert.match(row({ ...base, status: "paid" }, { reason: "no_calendar_for_room" }).googleCalendar.label, /^Not in Meeting Room calendar: no calendar set/);
+});
+
+test("E2E F3: a different email is a different person, even with the same phone", { skip }, async () => {
+  const { findOrCreateContact } = await import("../src/services/contactMatching.service.js");
+  await M.Contact.create({ workspaceId: ids.wsId, firstName: "Shared", email: "first@phone.test", phone: "+852 5555 0000", ownerId: ids.admin });
+  const other = await findOrCreateContact(ids.wsId, ids.admin, { email: "second@phone.test", phone: "+852 5555 0000", firstName: "Second" });
+  assert.equal(other.created, true);
+  assert.equal(other.contact.email, "second@phone.test");
+  // No email given: the phone still finds the existing contact.
+  const byPhone = await findOrCreateContact(ids.wsId, ids.admin, { phone: "+852 5555 0000", firstName: "Phone only" });
+  assert.equal(byPhone.matchedBy, "phone");
+  // A contact without an email can still be matched by phone.
+  const noEmail = await M.Contact.create({ workspaceId: ids.wsId, firstName: "NoMail", phone: "+852 6666 1111", ownerId: ids.admin });
+  const r = await findOrCreateContact(ids.wsId, ids.admin, { email: "nomail@phone.test", phone: "+852 6666 1111" });
+  assert.equal(String(r.contact._id), String(noEmail._id));
+});
+
+test("E2E F6/F7: walk-in deals are source walk_in with all deal ids; newsletter interests never make deals", { skip }, async () => {
+  const wendy = await M.Contact.findOne({ email: "wendy@walk.test" });
+  const deals = await M.Deal.find({ contactId: wendy._id }).lean();
+  assert.ok(deals.length === 2 && deals.every((d) => d.source === "walk_in"), deals.map((d) => d.source).join());
+  const sub = await M.FormSubmission.findOne({ contactId: wendy._id }).lean();
+  assert.equal(sub.dealIds.length, 2);
+  const list = await api(`/forms/${ids.form}/submissions`);
+  const item = list.json.data.items.find((i) => String(i._id) === String(sub._id));
+  assert.equal(item.dealIds.length, 2);
+  assert.ok(item.dealIds.every((d) => d.title.startsWith("Walk-in enquiry")));
+
+  const news = await api("/forms", {
+    method: "POST",
+    body: {
+      name: "Newsletter", slug: "newsletter-qa", type: "newsletter", consentText: "Send me news",
+      fields: [
+        { key: "first_name", label: "First name", type: "text", mapTo: "firstName" },
+        { key: "email", label: "Email", type: "email", mapTo: "email", required: true },
+        { key: "interest", label: "Interested in", type: "checkboxes", mapTo: "interests", options: ["Coworking", "Virtual Office"] },
+      ],
+      flodesk: { enabled: true },
+    },
+  });
+  assert.equal(news.status, 201, JSON.stringify(news.json));
+  const r = await realFetch(`${base}/public/forms/newsletter-qa`, {
+    method: "POST", headers: { "Content-Type": "application/json", Origin: "https://banyanworkspace.com" },
+    body: JSON.stringify({ publicKey: news.json.data.publicKey, first_name: "Nia", email: "nia@news.test", interest: ["Coworking"], consent: "yes" }),
+  });
+  assert.equal(r.status, 201, await r.text());
+  const nia = await M.Contact.findOne({ email: "nia@news.test" });
+  assert.equal(await M.Deal.countDocuments({ contactId: nia._id }), 0, "no deal from a newsletter form");
+  const s = await waitFor(() => M.FormSubmission.findOne({ contactId: nia._id, "flodesk.status": "added" }).lean());
+  assert.ok(s, "processed and added to Flodesk");
+  assert.deepEqual(s.flodesk.segments, ["Coworking [Automated]"]);
+});
