@@ -745,7 +745,8 @@ export async function buildRoomBookingTimeline(b) {
   // Payment
   const p = wp.payment;
   if (p?.paidAt || (p && ["paid", "cancelled"].includes(wp.status) && p.status === "paid"))
-    add(p.paidAt || fallbackAt, `${paidNote(wp).replace(/^p/, "P")}${p.mode === "test" ? " (test mode)" : ""}`);
+    // Credit bookings never involve Stripe, so no mode suffix for them.
+    add(p.paidAt || fallbackAt, `${paidNote(wp).replace(/^p/, "P")}${p.mode === "test" && p.method !== "credits" ? " (test mode)" : ""}`);
   if (row.status === "expired") add(b.holdExpiresAt || fallbackAt, "Hold expired without payment");
 
   // Cancellation and refund

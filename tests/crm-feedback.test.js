@@ -386,7 +386,9 @@ test("#5 public form with its own pipeline: deal, task and staff notification em
   const c = await M.Contact.findOne({ email: "walt@example.com" });
   const deal = await M.Deal.findOne({ contactId: c._id });
   assert.equal(deal.title, "Walk-in — Walt");
-  assert.ok(await M.Task.exists({ contactId: c._id, "metadata.origin": "form_submission" }));
+  // Walk-in forms get the walk-in follow-up (24 Nov, client answer 5), linked to the deal.
+  assert.ok(await M.Task.exists({ contactId: c._id, dealId: deal._id, "metadata.origin": "walk_in", title: "Follow up walk-in: Walt" }));
+  assert.equal(await M.Task.countDocuments({ contactId: c._id }), 1);
   assert.equal(google.sentMail.length, 1);
   assert.match(google.sentMail[0], /To: team@banyan.test/);
 });

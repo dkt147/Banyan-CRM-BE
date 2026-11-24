@@ -72,7 +72,7 @@ test("reports: lead source and enquiry keys, week periods start Monday", () => {
 /* ---------- fakes: WordPress + Flodesk ---------- */
 const realFetch = globalThis.fetch;
 const wp = { pages: new Map(), takenPaths: new Set(["about"]), pageSeq: 100, bookings: new Map(), creditRequests: [], creditClash: false, noPages: false };
-const fd = { subscribers: new Map(), segmentAdds: [], fail429: 0, requests: 0 };
+const fd = { subscribers: new Map(), ids: new Map(), segmentAdds: [], fail429: 0, requests: 0, noIdInResponse: false };
 const SEGMENTS = ["Coworking [Automated]", "Serviced Office [Automated]", "Event Space / Venue Hire [Automated]", "No Product [Automated]"].map((name, i) => ({ id: `seg${i}`, name }));
 const json = (status, data) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
 const hh = (n) => `${String(n).padStart(2, "0")}:00`;
@@ -101,9 +101,25 @@ globalThis.fetch = async (input, init = {}) => {
     if (fd.fail429 > 0) { fd.fail429--; return json(429, { message: "Too many requests" }); }
     const p = url.pathname.replace("/v1/", "");
     if (p === "segments") return json(200, { meta: { page: 1, total_pages: 1 }, data: SEGMENTS });
-    if (p === "subscribers" && method === "POST") { fd.subscribers.set(body.email, body); return json(200, { id: "sub1", email: body.email }); }
+    if (p === "subscribers" && method === "POST") {
+      const id = fd.ids.get(body.email) || `sub${fd.ids.size + 1}`;
+      fd.ids.set(body.email, id);
+      fd.subscribers.set(body.email, body);
+      return json(200, fd.noIdInResponse ? { email: body.email } : { id, email: body.email });
+    }
+    const one = p.match(/^subscribers\/([^/]+)$/);
+    if (one && method === "GET") {
+      const id = fd.ids.get(decodeURIComponent(one[1]));
+      return id ? json(200, { id, email: decodeURIComponent(one[1]) }) : json(404, { message: "Not Found" });
+    }
+    // Like the real API (F7): segments are added by subscriber id; an encoded "+" address is a 404.
     const seg = p.match(/^subscribers\/(.+)\/segments$/);
-    if (seg && method === "POST") { fd.segmentAdds.push({ email: decodeURIComponent(seg[1]), ids: body.segment_ids }); return json(200, {}); }
+    if (seg && method === "POST") {
+      const email = [...fd.ids].find(([, id]) => id === decodeURIComponent(seg[1]))?.[0];
+      if (!email) return json(404, { message: "Not Found" });
+      fd.segmentAdds.push({ email, ids: body.segment_ids });
+      return json(200, {});
+    }
     return json(404, { message: "not found" });
   }
   if (url.hostname !== "wp.test") return realFetch(input, init);
@@ -387,7 +403,10 @@ test("§5 credits: allowance, credit booking, insufficient credits, clash, cance
   assert.equal(await M.CreditLedger.countDocuments({ type: "use" }), 1, "nothing used on a clash");
 
   const detail = await api(`/room-bookings/${ref}`);
-  assert.ok(detail.json.data.timeline.some((t) => t.text === "Paid with 3 meeting room credits (test mode)"), JSON.stringify(detail.json.data.timeline));
+  // 24 Nov retest: no "(test mode)" on credit bookings; the card can open on the booking's month.
+  assert.ok(detail.json.data.timeline.some((t) => t.text === "Paid with 3 meeting room credits"), JSON.stringify(detail.json.data.timeline));
+  assert.equal((await api(`/companies/${ids.company}/credits`)).json.data.nextBookingMonth, month);
+  assert.equal((await api(`/companies/${ids.other}/credits`)).json.data.nextBookingMonth, null);
 
   // Cancel in the CRM: WordPress frees the slot, the CRM gives the hours back (once).
   const cancel = await api(`/room-bookings/${ref}/cancel`, { method: "POST", body: { reason: "TEST" } });
@@ -398,6 +417,7 @@ test("§5 credits: allowance, credit booking, insufficient credits, clash, cance
   assert.equal(credits.json.data.remaining, 4);
   assert.deepEqual(credits.json.data.entries.map((e) => e.type), ["use", "refund"]);
   assert.equal(credits.json.data.entries[0].bookingRef, ref);
+  assert.equal(credits.json.data.nextBookingMonth, null, "a cancelled booking is not next");
   const after = await api(`/room-bookings/${ref}`);
   assert.ok(after.json.data.timeline.some((t) => t.text === "Meeting room credits returned (3 h)"));
 
@@ -567,4 +587,76 @@ test("E2E F6/F7: walk-in deals are source walk_in with all deal ids; newsletter 
   const s = await waitFor(() => M.FormSubmission.findOne({ contactId: nia._id, "flodesk.status": "added" }).lean());
   assert.ok(s, "processed and added to Flodesk");
   assert.deepEqual(s.flodesk.segments, ["Coworking [Automated]"]);
+});
+
+/* ---------- 24 Nov retest and client answers ---------- */
+
+test("24 Nov F7: Flodesk segments are added by subscriber id (works for a + address; falls back to a lookup)", { skip }, async () => {
+  const { addSubscriber } = await import("../src/services/flodesk.service.js");
+  const r = await addSubscriber({ email: "dev+news2@x.test", firstName: "TEST", interests: ["Coworking"] });
+  assert.equal(r.status, "added");
+  assert.deepEqual(r.segments, ["Coworking [Automated]"]);
+  assert.equal(fd.segmentAdds.at(-1).email, "dev+news2@x.test");
+
+  fd.noIdInResponse = true;
+  try {
+    const again = await addSubscriber({ email: "dev+news2@x.test", interests: ["serviced_office"] });
+    assert.deepEqual(again.segments, ["Serviced Office [Automated]"], "underscored keys map too");
+    assert.equal(fd.segmentAdds.at(-1).email, "dev+news2@x.test");
+  } finally {
+    fd.noIdInResponse = false;
+  }
+});
+
+test("24 Nov answer 1: website pop-up enquiries go to Flodesk by service, recorded on the deals; TEST names skipped", { skip }, async () => {
+  const send = (body) =>
+    realFetch(`${base}/public/enquiries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "https://banyanworkspace.com" },
+      body: JSON.stringify(body),
+    }).then(async (r) => ({ status: r.status, json: await r.json() }));
+  const r = await send({ firstName: "Pia", lastName: "Pop", email: "pia+pop@x.test", phone: "+85291234567", interests: ["Serviced Offices"] });
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  const dealId = r.json.data.deals[0].id;
+  const deal = await waitFor(() => M.Deal.findOne({ _id: dealId, "metadata.flodesk.status": "added" }).lean());
+  assert.ok(deal, "added to Flodesk");
+  assert.deepEqual(deal.metadata.flodesk.segments, ["Serviced Office [Automated]"]);
+  assert.equal(fd.subscribers.get("pia+pop@x.test").first_name, "Pia");
+
+  const t = await send({ firstName: "TEST", lastName: "Pop", email: "test-pop@x.test", interests: ["Coworking"] });
+  assert.equal(t.status, 201, JSON.stringify(t.json));
+  const td = await waitFor(() => M.Deal.findOne({ _id: t.json.data.deals[0].id, "metadata.flodesk.status": "skipped" }).lean());
+  assert.ok(td, "test enquiry skipped");
+  assert.ok(!fd.subscribers.has("test-pop@x.test"));
+
+  const status = await api("/integrations/flodesk");
+  assert.ok(status.json.data.lastSuccessAt);
+});
+
+test("24 Nov answer 5: walk-in follow-up is exactly one task, due 10:00 HK the next day, services or not", { skip }, async () => {
+  const { Task } = await import("../src/models/Task.js");
+  const { nextDayAtInTimeZone } = await import("../src/services/publicEnquiry.service.js");
+  assert.equal(nextDayAtInTimeZone(new Date("2026-11-24T15:30:00Z")).toISOString(), "2026-11-25T02:00:00.000Z", "23:30 HK on the 24th -> 10:00 HK on the 25th");
+  assert.equal(nextDayAtInTimeZone(new Date("2026-11-24T01:00:00Z")).toISOString(), "2026-11-25T02:00:00.000Z");
+
+  const form = await M.Form.findByIdAndUpdate(ids.form, { $set: { createTask: true } }, { new: true });
+  const two = await submit({ publicKey: form.publicKey, first_name: "Tara", email: "tara@walk.test", services: ["Coworking Desks", "Serviced Offices"], news: "No" });
+  assert.equal(two.status, 201, JSON.stringify(two.json));
+  const tara = await M.Contact.findOne({ email: "tara@walk.test" });
+  const tasks = await Task.find({ contactId: tara._id }).lean();
+  assert.equal(tasks.length, 1, tasks.map((x) => x.title).join(" | "));
+  assert.equal(tasks[0].title, "Follow up walk-in: Tara");
+  assert.equal(tasks[0].dueAt.toISOString(), nextDayAtInTimeZone(new Date()).toISOString());
+  const taraSub = await M.FormSubmission.findOne({ contactId: tara._id }).lean();
+  assert.equal(String(tasks[0].dealId), String(taraSub.dealIds[0]), "linked to the first deal");
+  assert.equal(await M.Deal.countDocuments({ contactId: tara._id }), 2);
+
+  const none = await submit({ publicKey: form.publicKey, first_name: "Uma", email: "uma@walk.test", news: "No" });
+  assert.equal(none.status, 201, JSON.stringify(none.json));
+  const uma = await M.Contact.findOne({ email: "uma@walk.test" });
+  const umaTasks = await Task.find({ contactId: uma._id }).lean();
+  assert.equal(umaTasks.length, 1);
+  assert.equal(umaTasks[0].title, "Follow up walk-in: Uma");
+  assert.equal(umaTasks[0].dealId ?? null, null);
+  await M.Form.updateOne({ _id: ids.form }, { $set: { createTask: false } });
 });

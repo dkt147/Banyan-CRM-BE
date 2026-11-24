@@ -26,7 +26,7 @@ import { normalizeTags } from "../utils/contactTags.js";
 import { publicEnquirySchema } from "../validators/publicEnquiry.validators.js";
 import { findOrCreateContact } from "./contactMatching.service.js";
 import { sendWorkspaceEmail } from "./mail.service.js";
-import { createPublicEnquiry, endOfDayInTimeZone, getIntakeContext, isKnownService } from "./publicEnquiry.service.js";
+import { createPublicEnquiry, endOfDayInTimeZone, getIntakeContext, isKnownService, nextDayAtInTimeZone } from "./publicEnquiry.service.js";
 import { flodeskConsent, queueFlodeskForSubmission } from "./flodesk.service.js";
 
 const HONEYPOT_KEYS = ["website", "_honeypot", "website_confirm"];
@@ -245,7 +245,7 @@ export async function processFormSubmission(form, body, meta = {}) {
       const result = await createPublicEnquiry(
         payload,
         isWalkIn
-          ? { allowMultiple: true, label: "Walk-in enquiry", tag: "walk_in", createTask: Boolean(form.createTask), sourceForm: `CRM form: ${form.name}`, origin: "walk_in", source: "walk_in" }
+          ? { allowMultiple: true, label: "Walk-in enquiry", tag: "walk_in", createTask: false, sourceForm: `CRM form: ${form.name}`, origin: "walk_in", source: "walk_in" }
           : {},
       );
       contact = await Contact.findById(result.contactId);
@@ -281,7 +281,7 @@ export async function processFormSubmission(form, body, meta = {}) {
           dealIds = [String(deal._id)];
         }
       }
-      if (form.createTask) {
+      if (form.createTask && !isWalkIn) {
         await Task.create({
           workspaceId: form.workspaceId,
           title: `Follow up: ${form.name} — ${fullName || contact.email || ""}`.slice(0, 200),
@@ -308,6 +308,27 @@ export async function processFormSubmission(form, body, meta = {}) {
         occurredAt: new Date(),
         metadata: { formId: String(form._id), formSlug: form.slug, submissionId: String(submission._id) },
       }).catch((error) => console.error("[forms] activity failed:", error.message));
+    }
+
+    // Walk-in follow-up (client answer 5): exactly one task per submission, services or not, due the
+    // next day at 10:00 HK. The enquiry router is told not to make its own (createTask: false above).
+    if (isWalkIn && form.createTask) {
+      // The enquiry router stores "-" when there's no last name; leave it out of the title.
+      const name = [contact.firstName, contact.lastName].filter((n) => n && n !== "-").join(" ") || contact.email || "visitor";
+      await Task.create({
+        workspaceId: form.workspaceId,
+        title: `Follow up walk-in: ${name}`.slice(0, 200),
+        description: `Visited and filled in the ${form.name} form.${interests.length ? ` Interested in: ${interests.join(", ")}.` : ""}${mapped.notes ? ` Notes: ${mapped.notes}` : ""}`.slice(0, 5000),
+        contactId: contact._id,
+        dealId: dealIds[0],
+        assignedTo: contact.ownerId || owner._id,
+        createdBy: owner._id,
+        dueAt: nextDayAtInTimeZone(new Date()),
+        priority: "high",
+        status: "pending",
+        source: "system",
+        metadata: { origin: "walk_in", formId: String(form._id), submissionId: String(submission._id), allDealIds: dealIds.map(String) },
+      }).catch((error) => console.error("[forms] walk-in task failed:", error.message));
     }
 
     // Made by this submission: contacts are created after the submission record.

@@ -1,5 +1,6 @@
 import { publicEnquirySchema } from "../validators/publicEnquiry.validators.js";
 import { createPublicEnquiry } from "../services/publicEnquiry.service.js";
+import { queueFlodeskForEnquiry } from "../services/flodesk.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 
 function asString(value) {
@@ -44,6 +45,14 @@ export const createPublicEnquiryController = asyncHandler(async (req, res) => {
 
   const payload = publicEnquirySchema.parse(normalizeBody(req.body));
   const data = await createPublicEnquiry(payload);
+  // Flodesk by service (client answer 1, 24 Nov), in the background: never fails or slows the enquiry.
+  queueFlodeskForEnquiry({
+    dealIds: data.deals.map((d) => d.id),
+    email: payload.email,
+    firstName: payload.firstName,
+    lastName: payload.lastName,
+    interests: payload.interests,
+  });
   return res.status(201).json({
     success: true,
     message: "Thank you. Your enquiry has been received.",

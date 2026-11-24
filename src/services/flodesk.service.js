@@ -10,6 +10,7 @@
  */
 import { env } from "../config/env.js";
 import { FormSubmission } from "../models/FormSubmission.js";
+import { Deal } from "../models/Deal.js";
 
 const API = "https://api.flodesk.com/v1/";
 const SEGMENT_TTL_MS = 60 * 60 * 1000;
@@ -46,7 +47,9 @@ const MAPPING_ROWS = [
 
 /** Segment names for a list of interests (several interests -> several segments). */
 export function segmentNamesFor(interests = []) {
-  const list = (Array.isArray(interests) ? interests : [interests]).map((i) => String(i || "").trim().toLowerCase()).filter(Boolean);
+  const list = (Array.isArray(interests) ? interests : [interests])
+    .map((i) => String(i || "").toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
   if (!list.length) return [NO_PRODUCT_SEGMENT];
   return [...new Set(list.map((i) => INTEREST_SEGMENTS[i] || NO_PRODUCT_SEGMENT))];
 }
@@ -136,10 +139,20 @@ export async function addSubscriber({ email, firstName = "", lastName = "", inte
   const found = wanted.map((n) => byName.get(n.toLowerCase())).filter(Boolean);
   const missing = wanted.filter((n) => !byName.has(n.toLowerCase()));
 
-  await withRetry(() => flodesk("subscribers", { method: "POST", body: { email, first_name: firstName || undefined, last_name: lastName || undefined } }));
-  // Add-only: never removes the subscriber from segments they are already in.
-  if (found.length)
-    await withRetry(() => flodesk(`subscribers/${encodeURIComponent(email)}/segments`, { method: "POST", body: { segment_ids: found.map((s) => s.id) } }));
+  const created = await withRetry(() =>
+    flodesk("subscribers", { method: "POST", body: { email, first_name: firstName || undefined, last_name: lastName || undefined } }),
+  );
+  // Add-only: never removes the subscriber from segments they are already in. Flodesk doesn't find a
+  // subscriber by an encoded address containing "+" (F7), so segments are added by subscriber id.
+  if (found.length) {
+    let id = created?.id || created?.data?.id;
+    if (!id) {
+      const existing = await withRetry(() => flodesk(`subscribers/${encodeURIComponent(email)}`));
+      id = existing?.id || existing?.data?.id;
+    }
+    if (!id) throw new FlodeskError("Flodesk didn't return the subscriber id.", 502);
+    await withRetry(() => flodesk(`subscribers/${encodeURIComponent(id)}/segments`, { method: "POST", body: { segment_ids: found.map((s) => s.id) } }));
+  }
   return {
     status: "added",
     segments: found.map((s) => s.name),
@@ -176,12 +189,41 @@ export function queueFlodeskForSubmission(form, submission, { values, consent, m
     });
 }
 
+/**
+ * Website pop-up enquiries (client answer 1, 24 Nov): every enquiry goes to Flodesk by service, in the
+ * background. Replaces the Zapier zap. The result is stored on the enquiry's deals as metadata.flodesk
+ * { status, segments, reason, at }. Test enquiries (a name starting "TEST") are skipped.
+ */
+export function queueFlodeskForEnquiry({ dealIds = [], email, firstName = "", lastName = "", interests = [] }) {
+  const save = (state) =>
+    dealIds.length
+      ? Deal.updateMany({ _id: { $in: dealIds } }, { $set: { "metadata.flodesk": { ...state, at: new Date() } } }).catch(() => {})
+      : Promise.resolve();
+  const clean = String(email || "").trim().toLowerCase();
+  if (/^test\b/i.test(String(firstName || "").trim()))
+    return save({ status: "skipped", segments: [], reason: "Test enquiry (name starts with TEST)." });
+  if (!clean) return save({ status: "skipped", segments: [], reason: "No email address." });
+  return new Promise((resolve) => setImmediate(resolve))
+    .then(() => save({ status: "pending", segments: [], reason: null }))
+    .then(() => addSubscriber({ email: clean, firstName, lastName, interests }))
+    .then((result) => save(result))
+    .catch((error) => {
+      console.error("[flodesk] website enquiry failed:", error.message);
+      return save({ status: "failed", segments: [], reason: String(error.message).slice(0, 300) });
+    });
+}
+
 /** GET /integrations/flodesk */
 export async function flodeskStatus(workspaceId) {
-  const [lastOk, lastFail] = await Promise.all([
+  const latest = (a, b) => [a, b].filter(Boolean).sort((x, y) => new Date(y.at) - new Date(x.at))[0] || null;
+  const [okForm, failForm, okDeal, failDeal] = await Promise.all([
     FormSubmission.findOne({ workspaceId, "flodesk.status": "added" }).sort({ "flodesk.at": -1 }).select("flodesk").lean(),
     FormSubmission.findOne({ workspaceId, "flodesk.status": "failed" }).sort({ "flodesk.at": -1 }).select("flodesk").lean(),
+    Deal.findOne({ workspaceId, "metadata.flodesk.status": "added" }).sort({ "metadata.flodesk.at": -1 }).select("metadata.flodesk").lean(),
+    Deal.findOne({ workspaceId, "metadata.flodesk.status": "failed" }).sort({ "metadata.flodesk.at": -1 }).select("metadata.flodesk").lean(),
   ]);
+  const okState = latest(okForm?.flodesk, okDeal?.metadata?.flodesk);
+  const failState = latest(failForm?.flodesk, failDeal?.metadata?.flodesk);
   let connected = false;
   let segments = [];
   let lastError = null;
@@ -199,6 +241,6 @@ export async function flodeskStatus(workspaceId) {
     const segment = key ? INTEREST_SEGMENTS[key] : NO_PRODUCT_SEGMENT;
     return { interest, segment, found: connected ? names.has(segment.toLowerCase()) : null };
   });
-  if (!lastError && lastFail && (!lastOk || lastFail.flodesk.at > lastOk.flodesk.at)) lastError = lastFail.flodesk.reason;
-  return { connected, segments, mapping, lastError, lastSuccessAt: lastOk?.flodesk?.at || null };
+  if (!lastError && failState && (!okState || new Date(failState.at) > new Date(okState.at))) lastError = failState.reason;
+  return { connected, segments, mapping, lastError, lastSuccessAt: okState?.at || null };
 }

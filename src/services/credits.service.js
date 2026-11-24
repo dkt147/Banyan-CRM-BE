@@ -14,7 +14,7 @@ import { Company } from "../models/Company.js";
 import { Contact } from "../models/Contact.js";
 import { CreditLedger } from "../models/CreditLedger.js";
 import { AppError } from "../utils/AppError.js";
-import { hkParts } from "../utils/hkTime.js";
+import { hkInstant, hkParts } from "../utils/hkTime.js";
 import {
   CRM_NOTES_PREFIX,
   WP_ROOMS,
@@ -51,6 +51,31 @@ function summarise(company, rows) {
   return { allowance, adjustments: round(adjustments), used: round(used), remaining: round(allowance + adjustments - used) };
 }
 
+/**
+ * Month (YYYY-MM, HK) of the company's next credit booking from today on that isn't cancelled, or null.
+ * The credits card opens on it when the current month has no entries (24 Nov retest).
+ */
+async function nextCreditBookingMonth(workspaceId, companyId) {
+  const [uses, refunds] = await Promise.all([
+    CreditLedger.find({ workspaceId, companyId, type: "use", bookingRef: { $type: "string" } }).select("bookingRef").lean(),
+    CreditLedger.find({ workspaceId, companyId, type: "refund", bookingRef: { $type: "string" } }).select("bookingRef").lean(),
+  ]);
+  const refunded = new Set(refunds.map((r) => r.bookingRef));
+  const refs = uses.map((u) => u.bookingRef).filter((ref) => !refunded.has(ref));
+  if (!refs.length) return null;
+  const today = hkParts(new Date());
+  const next = await Booking.findOne({
+    workspaceId,
+    externalRef: { $in: refs },
+    status: { $nin: ["cancelled", "refunded", "expired"] },
+    startAt: { $gte: hkInstant(today.year, today.month, today.day) },
+  })
+    .sort({ startAt: 1 })
+    .select("startAt")
+    .lean();
+  return next ? currentMonth(next.startAt) : null;
+}
+
 /** GET /companies/:id/credits?month=YYYY-MM */
 export async function companyCredits(workspaceId, companyId, monthValue) {
   const month = parseMonth(monthValue);
@@ -60,6 +85,7 @@ export async function companyCredits(workspaceId, companyId, monthValue) {
   return {
     company: { id: String(company._id), name: company.name },
     month,
+    nextBookingMonth: await nextCreditBookingMonth(workspaceId, company._id),
     ...summarise(company, rows),
     entries: rows.map((r) => ({
       id: String(r._id), at: r.at, type: r.type, hours: r.hours, bookingRef: r.bookingRef, room: r.room, by: r.by, note: r.note,

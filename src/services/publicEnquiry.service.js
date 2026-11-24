@@ -172,6 +172,12 @@ export function endOfDayInTimeZone(date, timeZone = "Asia/Hong_Kong") {
   return new Date(guess);
 }
 
+/** The next day at `hour`:00 in the time zone (walk-in follow-ups: 10:00 HK the day after). */
+export function nextDayAtInTimeZone(date, hour = 10, timeZone = "Asia/Hong_Kong") {
+  const startOfNextDay = endOfDayInTimeZone(date, timeZone).getTime() + 1;
+  return new Date(startOfNextDay + hour * 60 * 60 * 1000);
+}
+
 function normalizeKey(value) {
   return String(value || "")
     .toLowerCase()
