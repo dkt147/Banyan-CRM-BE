@@ -31,8 +31,18 @@ const DEFAULTS = {
   pushFrom: { small: null, medium: null, library: null },
   includePending: false,
   showPartnerEvents: true,
-  partnerBlocks: { enabled: false },
+  partnerBlocks: { enabled: false, rooms: { small: true, medium: true, library: false } },
 };
+
+// Per-room partner blocking (25 Nov, §4). The Library (the partner's live calendar) is off unless ticked.
+function partnerBlockRooms(saved = {}, input = undefined) {
+  const rooms = {};
+  for (const key of ROOM_KEYS) {
+    const fromInput = input && key in input ? input[key] : undefined;
+    rooms[key] = fromInput != null ? Boolean(fromInput) : saved[key] != null ? Boolean(saved[key]) : DEFAULTS.partnerBlocks.rooms[key];
+  }
+  return rooms;
+}
 
 export async function getRoomCalendarSettings(workspaceId) {
   const row = await Integration.findOne({ workspaceId, provider: "wordpress" }).select("config.roomCalendars").lean();
@@ -43,7 +53,7 @@ export async function getRoomCalendarSettings(workspaceId) {
     pushFrom: { ...DEFAULTS.pushFrom, ...saved.pushFrom },
     includePending: Boolean(saved.includePending),
     showPartnerEvents: saved.showPartnerEvents !== false,
-    partnerBlocks: { enabled: Boolean(saved.partnerBlocks?.enabled) },
+    partnerBlocks: { enabled: Boolean(saved.partnerBlocks?.enabled), rooms: partnerBlockRooms(saved.partnerBlocks?.rooms) },
     updatedAt: saved.updatedAt || null,
     saved: true,
   };
@@ -318,7 +328,10 @@ export async function saveRoomCalendarSettings(workspaceId, input, userId) {
     pushFrom,
     includePending: input.includePending != null ? Boolean(input.includePending) : current.includePending,
     showPartnerEvents: input.showPartnerEvents != null ? Boolean(input.showPartnerEvents) : current.showPartnerEvents,
-    partnerBlocks: { enabled: input.partnerBlocks?.enabled != null ? Boolean(input.partnerBlocks.enabled) : current.partnerBlocks.enabled },
+    partnerBlocks: {
+      enabled: input.partnerBlocks?.enabled != null ? Boolean(input.partnerBlocks.enabled) : current.partnerBlocks.enabled,
+      rooms: partnerBlockRooms(current.partnerBlocks.rooms, input.partnerBlocks?.rooms),
+    },
     updatedAt: now,
     updatedBy: userId ? String(userId) : null,
   };

@@ -24,3 +24,20 @@ export function hkMonthRange(value) {
 
 /** Google all-day dates ("2026-11-10") start at Hong Kong midnight, not UTC midnight. */
 export const allDayToHk = (dateString) => (dateString ? `${dateString}T00:00:00+08:00` : null);
+
+const DATE_RX = /^(\d{4})-(\d{2})-(\d{2})$/;
+/** "YYYY-MM-DD" -> { year, month, day } when it's a real calendar date, else null. */
+export function parseHkDate(value) {
+  const m = DATE_RX.exec(String(value || "").trim());
+  if (!m) return null;
+  const [year, month, day] = m.slice(1).map(Number);
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) return null;
+  return { year, month, day };
+}
+
+/** Today's Hong Kong date as "YYYY-MM-DD". */
+export function hkToday(now = new Date()) {
+  const { year, month, day } = hkParts(now);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}

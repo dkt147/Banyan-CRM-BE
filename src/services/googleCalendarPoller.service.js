@@ -5,6 +5,12 @@ import { getProviderAccessToken, providerJson } from "./providerApi.service.js";
 import { importRulesFor } from "./roomCalendar.service.js";
 
 let running = false;
+let lastPollStartedAt = 0;
+// Called with a workspaceId when a poll sees a changed partner event in a room calendar (25 Nov, §4).
+const roomChangeListeners = [];
+export function onRoomCalendarChange(fn) {
+  roomChangeListeners.push(fn);
+}
 function eventsUrl(calendarId, timeMin, timeMax, pageToken) {
   const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`);
   url.searchParams.set("timeMin", timeMin.toISOString()); url.searchParams.set("timeMax", timeMax.toISOString());
@@ -15,6 +21,9 @@ function eventsUrl(calendarId, timeMin, timeMax, pageToken) {
 export async function pollGoogleCalendars() {
   if (running) return;
   running = true;
+  const since = lastPollStartedAt;
+  lastPollStartedAt = Date.now();
+  const changedWorkspaces = new Set();
   try {
     const integrations = await Integration.find({ provider: "google_calendar", status: "connected" }).select("workspaceId").lean();
     for (const integration of integrations) {
@@ -31,6 +40,7 @@ export async function pollGoogleCalendars() {
             const result = await providerJson(eventsUrl(calendarId, timeMin, timeMax, pageToken), { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } }, "Google Calendar background sync");
             for (const external of result.items || []) {
               if (!external.id || rules.skipEvent(external)) continue;
+              if (rules.isRoom && since && Date.parse(external.updated || 0) >= since) changedWorkspaces.add(String(integration.workspaceId));
               const filter = { workspaceId: integration.workspaceId, externalProvider: "google_calendar", externalEventId: external.id };
               if (external.status === "cancelled") {
                 await CalendarEvent.updateOne(filter, { $set: { status: "cancelled", "metadata.googleEventStatus": "cancelled", "metadata.googleSyncedAt": new Date() } });
@@ -50,4 +60,6 @@ export async function pollGoogleCalendars() {
     }
   } catch (error) { console.error("[google-calendar-poller] failed:", error.message); }
   finally { running = false; }
+  for (const workspaceId of changedWorkspaces)
+    for (const fn of roomChangeListeners) Promise.resolve().then(() => fn(workspaceId)).catch(() => {});
 }

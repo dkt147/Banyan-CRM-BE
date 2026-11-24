@@ -107,6 +107,7 @@ for (const op of ["updateOne", "updateMany", "findOneAndUpdate"]) {
 }
 schema.index({ workspaceId: 1, pipelineId: 1, stageId: 1, status: 1 });
 schema.index({ workspaceId: 1, status: 1, closedAt: 1 });
+schema.index({ workspaceId: 1, createdAt: -1 });
 // One deal per paid Stripe Checkout Session (website day passes, services/dayPassPurchase.service.js).
 schema.index(
   { workspaceId: 1, "metadata.stripeCheckoutSessionId": 1 },

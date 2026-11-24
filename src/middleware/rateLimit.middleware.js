@@ -90,3 +90,13 @@ export const registerLimiter = rateLimit({
   legacyHeaders: false,
   handler: tooMany("RATE_LIMITED", "Too many registration attempts."),
 });
+
+/** Change password: 5 attempts per signed-in user per 15 minutes (runs after requireAuth). */
+export const changePasswordLimiter = rateLimit({
+  windowMs: 15 * MINUTE,
+  limit: 5,
+  keyGenerator: (req) => `pw:${String(req.user?._id || ipKeyGenerator(req.ip))}`,
+  standardHeaders: "draft-7",
+  legacyHeaders: false,
+  handler: tooMany("PASSWORD_RATE_LIMITED", "Too many password change attempts. Try again in 15 minutes."),
+});

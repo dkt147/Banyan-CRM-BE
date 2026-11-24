@@ -526,10 +526,24 @@ test("#7 partner blocks: dry-run lists blocks and clashes; applying needs the se
     booking: { ref: "BNY-CLASH1", status: "paid", room_key: "library", room_name: "The Library", date: day, start_time: "15:00", end_time: "16:00", hours: 1, start_iso: `${day}T15:00:00+08:00`, end_iso: `${day}T16:00:00+08:00` },
     customer: { first_name: "Cara", email: "cara@example.com" }, payment: { mode: "live", status: "paid" },
   });
+  cal(LIB).set("allday1", { id: "allday1", summary: "Public holiday", status: "confirmed", start: { date: day }, end: { date: day } });
+  // 25 Nov §4: the Library is off by default, so nothing in it is scanned.
+  const offByDefault = await api("/room-bookings/partner-blocks/preview");
+  assert.equal(offByDefault.status, 200, JSON.stringify(offByDefault.json));
+  assert.deepEqual(offByDefault.json.data.rooms, { small: true, medium: true, library: false });
+  assert.equal(offByDefault.json.data.create.length, 0);
+  assert.ok(offByDefault.json.data.skipped.some((x) => x.room === "library" && x.reason === "room not ticked"));
+  const tick = await api("/room-bookings/google-calendars", { method: "PUT", body: { partnerBlocks: { rooms: { library: true } } } });
+  assert.equal(tick.status, 200, JSON.stringify(tick.json));
+  assert.deepEqual(tick.json.data.partnerBlocks, { enabled: false, rooms: { small: true, medium: true, library: true } });
+
+  // Ticked: the 14:00-16:00 slot overlaps a paid booking, so it's a conflict, not a block.
   const preview = await api("/room-bookings/partner-blocks/preview");
   assert.equal(preview.status, 200, JSON.stringify(preview.json));
-  assert.deepEqual(preview.json.data.create.map((c) => [c.room, c.date, c.start, c.hours]), [["library", day, 14, 2]]);
+  assert.deepEqual(preview.json.data.create, []);
   assert.deepEqual(preview.json.data.clashes.map((c) => c.ref), ["BNY-CLASH1"]);
+  assert.deepEqual(preview.json.data.conflicts.map((c) => [c.title, c.room, c.date, c.time, c.bookingRef]), [["Board meeting", "library", day, "14:00–16:00", "BNY-CLASH1"]]);
+  assert.ok(preview.json.data.skipped.some((x) => x.eventId === "allday1" && x.reason === "all-day event"));
   const off = await api("/room-bookings/partner-blocks/sync", { method: "POST" });
   assert.equal(off.status, 409);
   assert.equal(off.json.code, "PARTNER_BLOCKS_DISABLED");
@@ -578,23 +592,26 @@ test("partner blocks applied: create, no loop back to Google, move, removed-by-h
   const { upsertWpBooking } = await import("../src/services/wpRoomBooking.service.js");
   const { syncBookingToRoomCalendar } = await import("../src/services/roomCalendar.service.js");
   const LIB = DEFAULT_LIBRARY_CALENDAR;
-  const on = await api("/room-bookings/google-calendars", { method: "PUT", body: { partnerBlocks: { enabled: true } } });
+  const on = await api("/room-bookings/google-calendars", { method: "PUT", body: { partnerBlocks: { enabled: true, rooms: { library: true } } } });
   assert.equal(on.status, 200, JSON.stringify(on.json));
   assert.equal(on.json.data.partnerBlocks.enabled, true);
 
+  // Move the partner meeting clear of the paid BNY-CLASH1 (15:00-16:00), so it can be blocked.
+  const orig = cal(LIB).get("partner2");
+  const day = orig.start.dateTime.slice(0, 10);
+  cal(LIB).set("partner2", { ...orig, start: { dateTime: `${day}T12:00:00+08:00` }, end: { dateTime: `${day}T13:30:00+08:00` } });
   const event = cal(LIB).get("partner2");
-  const day = event.start.dateTime.slice(0, 10);
   wpFake.blocks.clear();
   const first = await api("/room-bookings/partner-blocks/sync", { method: "POST" });
   assert.equal(first.status, 200, JSON.stringify(first.json));
   assert.equal(wpFake.blocks.size, 1);
   const [[blockRef, block]] = [...wpFake.blocks];
-  assert.deepEqual([block.room, block.date, block.start, block.hours, block.external_id], ["library", day, 14, 2, `gcal:partner2:${day}`]);
+  assert.deepEqual([block.room, block.date, block.start, block.hours, block.external_id], ["library", day, 12, 2, `gcal:partner2:${day}`]);
 
   // The block comes back into the CRM (manual sync / webhook) — it must not be pushed to Google.
   const before = cal(LIB).size;
   const cached = await upsertWpBooking({
-    booking: { ref: blockRef, status: "blocked", channel: "admin", room_key: "library", room_name: "The Library", date: day, start_time: "14:00", end_time: "16:00", hours: 2, start_iso: `${day}T14:00:00+08:00`, end_iso: `${day}T16:00:00+08:00`, created_at: new Date().toISOString(), external_id: block.external_id },
+    booking: { ref: blockRef, status: "blocked", channel: "admin", room_key: "library", room_name: "The Library", date: day, start_time: "12:00", end_time: "14:00", hours: 2, start_iso: `${day}T12:00:00+08:00`, end_iso: `${day}T14:00:00+08:00`, created_at: new Date().toISOString(), external_id: block.external_id },
     customer: { first_name: "Blocked", notes: block.reason },
   });
   assert.deepEqual(await syncBookingToRoomCalendar(cached.booking._id), { skipped: "partner_block" });
@@ -626,6 +643,19 @@ test("partner blocks applied: create, no loop back to Google, move, removed-by-h
   assert.deepEqual(clash.json.data.blockConflicts.map((c) => c.conflicts), [["BNY-PAID01"]]);
   assert.deepEqual((await api("/room-bookings/partner-blocks")).json.data.blockConflicts.map((c) => c.date), [day]);
   assert.equal((await api("/room-bookings/partner-blocks")).json.data.supported, true);
+
+  // 25 Nov §4: unticking a room removes only the blocks the CRM created for it.
+  wpFake.clashRoomDates.clear();
+  cal(LIB).delete("partner3");
+  cal(LIB).set("partner4", { id: "partner4", summary: "Workshop", status: "confirmed", start: { dateTime: `${day}T10:00:00+08:00` }, end: { dateTime: `${day}T11:00:00+08:00` } });
+  await api("/room-bookings/partner-blocks/sync", { method: "POST" });
+  assert.equal(wpFake.blocks.size, 1);
+  wpFake.blocks.set("BNY-MANUAL", { room: "library", date: day, start: 17, hours: 1, reason: "Set by hand in WP Admin" });
+  await api("/room-bookings/google-calendars", { method: "PUT", body: { partnerBlocks: { rooms: { library: false } } } });
+  const untick = await api("/room-bookings/partner-blocks/sync", { method: "POST" });
+  assert.equal(untick.status, 200, JSON.stringify(untick.json));
+  assert.deepEqual([...wpFake.blocks.keys()], ["BNY-MANUAL"], "the manual block stays");
+  assert.ok(cal(LIB).has("partner4"), "Google is never written to");
 });
 
 test("public form HTML post: _return_url wins over an origin-only Referer, but only on allowed sites", { skip }, async () => {

@@ -6,6 +6,7 @@ import { Company } from "../models/Company.js";
 import { Activity } from "../models/Activity.js";
 import { Task } from "../models/Task.js";
 import { AppError } from "../utils/AppError.js";
+import { createdRangeFilter } from "../utils/createdRange.js";
 import { fireDealTrigger } from "./automation.service.js";
 export async function listDeals(workspaceId, q = {}) {
   const page = Math.max(+q.page || 1, 1),
@@ -27,6 +28,8 @@ export async function listDeals(workspaceId, q = {}) {
       { title: { $regex: q.search, $options: "i" } },
       { source: { $regex: q.search, $options: "i" } },
     ];
+  const created = createdRangeFilter(q);
+  if (created) Object.assign(filter, created);
   const [items, total] = await Promise.all([
     Deal.find(filter)
       .populate("contactId companyId pipelineId stageId ownerId")

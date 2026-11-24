@@ -90,4 +90,8 @@ export const contactListQuerySchema = z.object({
     .enum(["true", "false", "all"])
     .transform((value) => (value === "all" ? null : value === "true"))
     .default("false"),
+
+  // Hong Kong dates, inclusive (25 Nov, §1). Checked in the service (400 INVALID_DATE_RANGE).
+  createdFrom: z.string().trim().max(20).optional(),
+  createdTo: z.string().trim().max(20).optional(),
 });

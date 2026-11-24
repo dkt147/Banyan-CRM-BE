@@ -231,7 +231,8 @@ r.get(
   }),
 );
 
-// Body: { calendars: { small, medium, library }, includePending, showPartnerEvents, partnerBlocks: { enabled } }.
+// Body: { calendars: { small, medium, library }, includePending, showPartnerEvents,
+//         partnerBlocks: { enabled, rooms: { small, medium, library } } }.
 // Checks the connected Google account can write to each calendar; pushes start from now (no backfill).
 r.put(
   "/google-calendars",

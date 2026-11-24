@@ -35,6 +35,8 @@ const schema = new mongoose.Schema(
     jobTitle: String,
     isActive: { type: Boolean, default: true, index: true },
     lastLoginAt: Date,
+    // Set when the password changes (25 Nov, §2); older access tokens are refused.
+    passwordChangedAt: { type: Date, default: null },
     preferences: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
   { timestamps: true },

@@ -113,7 +113,17 @@ export async function partnerBlockStatus(workspaceId) {
     enabled: settings.partnerBlocks.enabled,
     supported: state.supported ?? null, // null = not tried yet
     blocks: Object.values(state.map || {}).length,
+    rooms: settings.partnerBlocks.rooms,
     clashes: state.clashes || [],
+    // Partner events not blocked because they overlap a website booking, plus any WordPress refused.
+    conflicts: [
+      ...(state.conflicts || []),
+      ...(state.blockConflicts || []).map((c) => ({
+        title: String(c.reason || "").replace(/^Partner: /, ""), room: c.room, date: c.date,
+        time: `${String(c.start).padStart(2, "0")}:00–${String(c.start + c.hours).padStart(2, "0")}:00`,
+        bookingRef: c.conflicts?.[0]?.ref || null, bookingStatus: null, message: c.message,
+      })),
+    ],
     blockConflicts: state.blockConflicts || [],
     lastRun: state.lastRun || null,
     lastError: state.lastError || null,
@@ -131,27 +141,59 @@ export async function syncPartnerBlocks(workspaceId, { dryRun = true } = {}) {
   if (!(await isGoogleCalendarConnected(workspaceId)))
     throw new AppError("Google Calendar isn't connected (Settings > Integrations > Google).", 409, "INTEGRATION_NOT_CONNECTED");
 
+  // Per-room ticks (25 Nov, §4): only rooms that are ticked and have a calendar are scanned.
   // A calendar shared by several rooms can't say which room the partner uses: skip it.
   const roomsByCalendar = new Map();
   for (const room of ROOM_KEYS) {
     const id = settings.calendars[room];
     if (id) roomsByCalendar.set(id, [...(roomsByCalendar.get(id) || []), room]);
   }
-  const wanted = new Map(); // externalId → { room, date, start, hours, reason, eventId, calendarId }
+  const ticked = settings.partnerBlocks.rooms || {};
+  const wanted = new Map(); // key -> { room, date, start, hours, reason, eventId, calendarId, title }
   const skipped = [];
   for (const [calendarId, rooms] of roomsByCalendar) {
     if (rooms.length > 1) { skipped.push({ calendarId, reason: `used by several rooms (${rooms.join(", ")})` }); continue; }
-    for (const event of await listPartnerEvents(workspaceId, calendarId))
+    const room = rooms[0];
+    if (!ticked[room]) { skipped.push({ room, calendarId, reason: "room not ticked" }); continue; }
+    for (const event of await listPartnerEvents(workspaceId, calendarId)) {
+      // All-day entries (holidays, notes, out-of-office) don't block a room; timed events do.
+      if (event.start?.date) { skipped.push({ room, eventId: event.id, title: String(event.summary || "").slice(0, 120), reason: "all-day event" }); continue; }
       for (const slot of eventToSlots(event))
         wanted.set(`${event.id}|${slot.date}`, {
-          room: rooms[0], ...slot, eventId: event.id, calendarId,
+          room, ...slot, eventId: event.id, calendarId,
+          title: String(event.summary || "Busy").slice(0, 120),
           reason: `Partner: ${String(event.summary || "busy").slice(0, 120)}`,
           external_id: `gcal:${event.id}:${slot.date}`,
         });
+    }
   }
 
   const state = await loadState(workspaceId);
   const map = { ...(state.map || {}) };
+
+  // Never block over a paid (or held) website booking: those slots are conflicts for staff to sort out.
+  const clashes = [];
+  const conflicts = [];
+  for (const [key, want] of wanted) {
+    if (map[key]) continue; // already blocked by the CRM
+    const s = new Date(`${want.date}T${String(want.start).padStart(2, "0")}:00:00+08:00`);
+    const e = new Date(s.getTime() + want.hours * 3600000);
+    const hits = await Booking.find({
+      workspaceId, externalRef: { $type: "string" }, "metadata.wp.roomKey": want.room,
+      "metadata.wp.status": { $in: ["paid", "pending"] }, startAt: { $lt: e }, endAt: { $gt: s },
+    }).select("externalRef startAt endAt metadata.wp.status").lean();
+    if (!hits.length) continue;
+    wanted.delete(key);
+    for (const h of hits) {
+      clashes.push({ ref: h.externalRef, status: h.metadata.wp.status, room: want.room, date: want.date, partnerEventId: want.eventId, partnerEvent: want.reason });
+      conflicts.push({
+        title: want.title, room: want.room, date: want.date,
+        time: `${String(want.start).padStart(2, "0")}:00–${String(want.start + want.hours).padStart(2, "0")}:00`,
+        bookingRef: h.externalRef, bookingStatus: h.metadata.wp.status, eventId: want.eventId,
+      });
+    }
+  }
+
   const same = (a, b) => a.room === b.room && a.date === b.date && a.start === b.start && a.hours === b.hours;
   const create = [];
   const remove = [];
@@ -161,21 +203,12 @@ export async function syncPartnerBlocks(workspaceId, { dryRun = true } = {}) {
     if (have && same(have, want)) unchanged += 1;
     else { if (have) remove.push({ key, ...have }); create.push({ key, ...want }); }
   }
+  // Only blocks the CRM created (in map) are ever removed, e.g. after a room is unticked.
   for (const [key, have] of Object.entries(map)) if (!wanted.has(key)) remove.push({ key, ...have });
 
-  // Clashes: partner time that overlaps a paid or pending website booking (needs a person).
-  const clashes = [];
-  for (const want of wanted.values()) {
-    const s = new Date(`${want.date}T${String(want.start).padStart(2, "0")}:00:00+08:00`);
-    const e = new Date(s.getTime() + want.hours * 3600000);
-    const hits = await Booking.find({
-      workspaceId, externalRef: { $type: "string" }, "metadata.wp.roomKey": want.room,
-      "metadata.wp.status": { $in: ["paid", "pending"] }, startAt: { $lt: e }, endAt: { $gt: s },
-    }).select("externalRef startAt endAt metadata.wp.status").lean();
-    for (const h of hits) clashes.push({ ref: h.externalRef, status: h.metadata.wp.status, room: want.room, date: want.date, partnerEventId: want.eventId, partnerEvent: want.reason });
-  }
-
-  const result = { dryRun, create, remove, unchanged, clashes, skipped, supported: state.supported ?? null };
+  if (conflicts.length && !dryRun)
+    for (const c of conflicts) console.warn(`[partner-blocks] conflict: "${c.title}" ${c.room} ${c.date} ${c.time} overlaps ${c.bookingRef} (${c.bookingStatus})`);
+  const result = { dryRun, rooms: ticked, create, remove, unchanged, clashes, conflicts, skipped, supported: state.supported ?? null };
   if (dryRun) return result;
 
   const errors = [];
@@ -196,14 +229,27 @@ export async function syncPartnerBlocks(workspaceId, { dryRun = true } = {}) {
     else errors.push({ key: c.key, status: res.status, message: res.data?.message || `HTTP ${res.status}` });
   }
   await saveState(workspaceId, {
-    map, supported: true, clashes, blockConflicts, lastRun: new Date().toISOString(),
+    map, supported: true, clashes, conflicts, blockConflicts, lastRun: new Date().toISOString(),
     lastError: errors.length ? `${errors.length} block(s) failed: ${errors[0].message}` : null,
   });
   return { ...result, supported: true, errors, blockConflicts };
 }
 
 /** Background job: only when enabled and WordPress is known (or not yet known) to support blocks. */
+const jobRunning = new Set();
 export async function runPartnerBlocksJob(workspaceId) {
+  // The 3-minute timer and the poll trigger can coincide: one run at a time per workspace.
+  const key = String(workspaceId);
+  if (jobRunning.has(key)) return;
+  jobRunning.add(key);
+  try {
+    await runPartnerBlocksJobNow(workspaceId);
+  } finally {
+    jobRunning.delete(key);
+  }
+}
+
+async function runPartnerBlocksJobNow(workspaceId) {
   try {
     const settings = await getRoomCalendarSettings(workspaceId);
     if (!settings.partnerBlocks.enabled) return;

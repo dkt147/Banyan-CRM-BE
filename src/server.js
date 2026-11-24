@@ -2,7 +2,7 @@ import app from "./app.js";
 import { connectDatabase } from "./config/database.js";
 import { env } from "./config/env.js";
 import { runMembershipRenewalJobs } from "./services/membershipRenewalJobs.service.js";
-import { pollGoogleCalendars } from "./services/googleCalendarPoller.service.js";
+import { onRoomCalendarChange, pollGoogleCalendars } from "./services/googleCalendarPoller.service.js";
 import { pollGmailInboxes } from "./services/gmailPoller.service.js";
 import { runScheduledAutomations } from "./services/automation.service.js";
 import { getWpBookingContext, runWpBookingSyncJob } from "./services/wpRoomBooking.service.js";
@@ -35,5 +35,7 @@ app.listen(env.PORT, () => {
   setTimeout(partnerBlocks, 90_000);
   // Label test bookings already in the room calendars "TEST – " (no-op once done).
   setTimeout(() => relabelTestEvents().catch((e) => console.error("[room-calendar] relabel:", e.message)), 120_000);
-  setInterval(partnerBlocks, 10 * 60 * 1000).unref();
+  // Every 3 minutes while enabled (25 Nov, §4), and straight after a poll that saw a room calendar change.
+  setInterval(partnerBlocks, 3 * 60 * 1000).unref();
+  onRoomCalendarChange((workspaceId) => runPartnerBlocksJob(workspaceId));
 });

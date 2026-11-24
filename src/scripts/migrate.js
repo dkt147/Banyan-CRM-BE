@@ -15,8 +15,9 @@ import * as wpRoomBookings from "../migrations/20261111-wp-room-bookings.js";
 import * as crmFeedback from "../migrations/20261117-crm-feedback.js";
 import * as dayPassPurchases from "../migrations/20261118-day-pass-purchases.js";
 import * as creditsLoyalty from "../migrations/20261119-credits-loyalty.js";
+import * as dayPassesDates from "../migrations/20261125-day-passes-dates.js";
 
-const MIGRATIONS = [phase1, wpRoomBookings, crmFeedback, dayPassPurchases, creditsLoyalty];
+const MIGRATIONS = [phase1, wpRoomBookings, crmFeedback, dayPassPurchases, creditsLoyalty, dayPassesDates];
 
 const args = new Set(process.argv.slice(2));
 const apply = args.has("--apply");

@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { createdRangeFilter } from "../utils/createdRange.js";
 import { Contact } from "../models/Contact.js";
 import { Company } from "../models/Company.js";
 import { Deal } from "../models/Deal.js";
@@ -66,6 +67,8 @@ export async function getContacts({
   companyId,
   tag,
   isArchived = false,
+  createdFrom,
+  createdTo,
 }) {
   const skip = (page - 1) * limit;
 
@@ -91,6 +94,9 @@ export async function getContacts({
 
   const searchFilter = await contactSearchFilter(workspaceId, search);
   if (searchFilter) Object.assign(filter, searchFilter);
+
+  const created = createdRangeFilter({ createdFrom, createdTo });
+  if (created) Object.assign(filter, created);
 
   const [contacts, total] = await Promise.all([
     Contact.find(filter)

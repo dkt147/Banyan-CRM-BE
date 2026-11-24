@@ -21,6 +21,9 @@ export async function requireAuth(req, _res, next) {
         401,
         "USER_INACTIVE",
       );
+    // Signed out everywhere after a password change (1 s slack for tokens issued in that second).
+    if (user.passwordChangedAt && payload.iat && payload.iat * 1000 < user.passwordChangedAt.getTime() - 1000)
+      throw new AppError("Your password was changed. Please sign in again.", 401, "SESSION_ENDED");
     if (!user.workspaceId)
       throw new AppError(
         "User is not associated with a workspace.",

@@ -72,6 +72,7 @@ function syncPhoneOnUpdate() {
 schema.pre("findOneAndUpdate", syncPhoneOnUpdate);
 schema.pre("updateOne", syncPhoneOnUpdate);
 schema.index({ workspaceId: 1, email: 1 });
+schema.index({ workspaceId: 1, createdAt: -1 });
 schema.index({ workspaceId: 1, phoneNormalized: 1 });
 schema.index({ workspaceId: 1, lastEngagedAt: 1 });
 // The contact's own `language` field ("zh", …) must not be read as the text-search
