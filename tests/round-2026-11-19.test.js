@@ -660,3 +660,24 @@ test("24 Nov answer 5: walk-in follow-up is exactly one task, due 10:00 HK the n
   assert.equal(umaTasks[0].dealId ?? null, null);
   await M.Form.updateOne({ _id: ids.form }, { $set: { createTask: false } });
 });
+
+/* ---------- 27 Nov: failed room booking calls are recorded (no customer details) ---------- */
+test("room_booking.failed: credit-booking failures recorded with code, room, date and staff only", { skip }, async () => {
+  const { AuditLog } = await import("../src/models/AuditLog.js");
+  const rows = await AuditLog.find({ action: "room_booking.failed" }).sort({ createdAt: 1 }).lean();
+  const codes = rows.map((r) => r.after.code);
+  for (const c of ["CONTACT_HAS_NO_COMPANY", "VALIDATION_ERROR", "INSUFFICIENT_CREDITS"]) assert.ok(codes.includes(c), `${c} in ${codes}`);
+  const short = rows.find((r) => r.after.code === "INSUFFICIENT_CREDITS");
+  assert.deepEqual(Object.keys(short.after).sort(), ["code", "date", "endpoint", "message", "room", "status"]);
+  assert.deepEqual([short.after.endpoint, short.after.status, short.after.room, short.after.date], ["credit-booking", 409, "small", day]);
+  assert.equal(String(short.actorId), String(ids.admin));
+  const clash = rows.find((r) => r.after.status === 409 && r.after.code !== "INSUFFICIENT_CREDITS");
+  assert.equal(clash.after.message, "Sorry, that time is already booked.");
+  const all = JSON.stringify(rows.map((r) => r.after));
+  assert.ok(!all.includes("ann@acme.test") && !all.includes("TEST credit"), "no customer email or notes");
+  // Successful calls are not recorded.
+  assert.equal(rows.filter((r) => r.after.status < 400).length, 0);
+
+  const { scrubMessage } = await import("../src/utils/roomBookingFailures.js");
+  assert.equal(scrubMessage("Invalid email jane.doe@example.com or phone +852 9123 4567."), "Invalid email [email] or phone [number].");
+});

@@ -40,6 +40,7 @@ import {
   syncBookingToRoomCalendar,
 } from "../services/roomCalendar.service.js";
 import { partnerBlockStatus, syncPartnerBlocks } from "../services/partnerBlocks.service.js";
+import { recordRoomBookingFailure } from "../utils/roomBookingFailures.js";
 
 const r = Router();
 r.use(requireAuth);
@@ -295,5 +296,8 @@ r.get(
     res.json({ success: true, data: { ...toRoomBookingRow(b), notes: b.notes || "", timeline, raw: b.metadata?.wpRawPayload || null } });
   }),
 );
+
+// Failed checkout / credit-booking / sync calls -> AuditLog "room_booking.failed" (no customer details).
+r.use(recordRoomBookingFailure);
 
 export default r;
