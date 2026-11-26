@@ -8,6 +8,7 @@ import { Task } from "../models/Task.js";
 import { AppError } from "../utils/AppError.js";
 import { createdRangeFilter } from "../utils/createdRange.js";
 import { recordUpdate } from "./changeLog.service.js";
+import { effectiveFollowUp, followUpDueAt } from "../utils/stageFollowUp.js";
 
 /** Timeline title for a deal save (26 Nov, B1). */
 export function dealUpdateSubject(changes, before) {
@@ -175,24 +176,31 @@ export async function updateDeal(workspaceId, userId, id, payload) {
   return getDeal(workspaceId, id);
 }
 
+// Follow-up task per stage (27 Nov b, C): one task, only when the stage's followUp is on.
 async function runStageFollowUpAutomation(deal, userId, stage, workspaceId) {
   const { Task } = await import("../models/Task.js");
   const { Notification } = await import("../models/Notification.js");
-  const { Contact } = await import("../models/Contact.js");
-  const contact = await Contact.findOne({ _id: deal.contactId, workspaceId }).select("firstName lastName email").lean();
   const stageName = String(stage.name || "");
-  const now = new Date();
-  const dueAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-  // Idempotency: do not create duplicate stage tasks for the same deal/stage.
-  const title = `Follow up: ${deal.title} — ${stageName}`.slice(0, 200);
-  const exists = await Task.exists({ workspaceId, dealId: deal._id, title, status: { $nin: ["completed", "cancelled"] } });
-  if (!exists) await Task.create({ workspaceId, title, description: `Follow up after deal moved to ${stageName}.`, contactId: deal.contactId, companyId: deal.companyId, dealId: deal._id, assignedTo: deal.ownerId || userId, createdBy: userId, dueAt, priority: "high", source: "automation", metadata: { trigger: "deal_stage_changed", stageId: String(stage._id) } });
-  await Notification.create({ workspaceId, userId: deal.ownerId || userId, type: "deal_stage_changed", title: `Deal moved to ${stageName}`, body: `${deal.title} moved to ${stageName}. A follow-up task was created.`, entityType: "deal", entityId: deal._id, channel: "in_app" });
-  if (/quote sent/i.test(stageName)) {
-    const quoteTaskTitle = `Quote follow-up: ${deal.title}`.slice(0, 200);
-    const quoteExists = await Task.exists({ workspaceId, dealId: deal._id, title: quoteTaskTitle, status: { $nin: ["completed", "cancelled"] } });
-    if (!quoteExists) await Task.create({ workspaceId, title: quoteTaskTitle, description: `Follow up on the quote if the customer has not responded.`, contactId: deal.contactId, companyId: deal.companyId, dealId: deal._id, assignedTo: deal.ownerId || userId, createdBy: userId, dueAt: new Date(now.getTime() + 3 * 86400000), priority: "high", source: "automation", metadata: { trigger: "quote_sent_no_response", delayDays: 3 } });
+  const followUp = effectiveFollowUp(stage);
+  let taskCreated = false;
+  if (followUp.enabled) {
+    const title = (followUp.title ? followUp.title.split("{deal}").join(deal.title) : `Follow up: ${deal.title} — ${stageName}`).slice(0, 200);
+    // Idempotency: no duplicate open task for the same deal and title.
+    const exists = await Task.exists({ workspaceId, dealId: deal._id, title, status: { $nin: ["completed", "cancelled"] } });
+    if (!exists) {
+      await Task.create({
+        workspaceId, title, description: `Follow up after deal moved to ${stageName}.`, contactId: deal.contactId, companyId: deal.companyId,
+        dealId: deal._id, assignedTo: deal.ownerId || userId, createdBy: userId, dueAt: followUpDueAt(followUp.dueInDays),
+        priority: "high", source: "automation", metadata: { trigger: "deal_stage_changed", stageId: String(stage._id), dueInDays: followUp.dueInDays },
+      });
+      taskCreated = true;
+    }
   }
+  await Notification.create({
+    workspaceId, userId: deal.ownerId || userId, type: "deal_stage_changed", title: `Deal moved to ${stageName}`,
+    body: `${deal.title} moved to ${stageName}.${taskCreated ? " A follow-up task was created." : ""}`,
+    entityType: "deal", entityId: deal._id, channel: "in_app",
+  });
 }
 export async function moveDeal(workspaceId, userId, id, stageId) {
   return updateDeal(workspaceId, userId, id, { stageId });

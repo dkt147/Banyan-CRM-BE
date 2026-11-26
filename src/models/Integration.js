@@ -18,6 +18,7 @@ const schema = new mongoose.Schema(
         "docusign",
         "wordpress",
         "access_control",
+        "eventbrite",
       ],
       required: true,
     },

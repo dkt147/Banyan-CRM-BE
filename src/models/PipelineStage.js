@@ -20,6 +20,18 @@ const schema = new mongoose.Schema(
     isClosedWon: { type: Boolean, default: false },
     isClosedLost: { type: Boolean, default: false },
     isActive: { type: Boolean, default: true },
+    // Follow-up task when a deal enters this stage (27 Nov b, C). Missing = utils/stageFollowUp default.
+    followUp: {
+      type: new mongoose.Schema(
+        {
+          enabled: { type: Boolean, default: false },
+          dueInDays: { type: Number, min: 0, max: 60, default: 1 },
+          title: { type: String, maxlength: 150, default: "" },
+        },
+        { _id: false },
+      ),
+      default: undefined,
+    },
   },
   { timestamps: true },
 );

@@ -23,6 +23,7 @@ export const TAG_CATALOGUE = [
   { key: "form_submission", group: "source", label: "Form submission", description: "Sent a CRM form.", automatic: true },
   { key: "newsletter", group: "source", label: "Newsletter", description: "Signed up for the newsletter (also added to Flodesk).", automatic: true },
   { key: "walk_in", group: "source", label: "Walk-in", description: "Filled in the walk-in form at reception.", automatic: true },
+  { key: "eventbrite", group: "source", label: "Eventbrite", description: "Signed up for a Banyan event on Eventbrite.", automatic: true },
 ];
 
 /** "Active Member" / "active-member" / " ACTIVE member " -> "active_member". */

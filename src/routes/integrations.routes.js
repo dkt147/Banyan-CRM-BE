@@ -3,6 +3,8 @@ import { requireAuth, requirePermission } from "../middleware/auth.middleware.js
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { flodeskStatus } from "../services/flodesk.service.js";
 import { syncXeroInvoices } from "../services/xeroInvoiceSync.service.js";
+import { whatsappStatus } from "../services/whatsapp.service.js";
+import { ensureEventbriteWebhook, eventbriteStatus, syncEventbrite } from "../services/eventbriteSync.service.js";
 import { resourceRouter } from "./resource.routes.js";
 import { resourceRegistry } from "../utils/resourceRegistry.js";
 import {
@@ -68,7 +70,42 @@ r.post(
   requireAuth,
   syncGoogleCalendarEvent,
 );
-r.post("/whatsapp/messages", requireAuth, sendWhatsAppMessage);
+r.post("/whatsapp/messages", requireAuth, requirePermission("records.write"), sendWhatsAppMessage);
+// Eventbrite (27 Nov b, A). Admin only. Nothing is written to Eventbrite except creating the webhook.
+r.get(
+  "/eventbrite",
+  requireAuth,
+  requirePermission("workspace.manage"),
+  asyncHandler(async (_req, res) => {
+    res.json({ success: true, data: await eventbriteStatus() });
+  }),
+);
+r.post(
+  "/eventbrite/sync",
+  requireAuth,
+  requirePermission("workspace.manage"),
+  asyncHandler(async (_req, res) => {
+    await syncEventbrite({ ifRunning: "throw" });
+    res.json({ success: true, data: await eventbriteStatus() });
+  }),
+);
+r.post(
+  "/eventbrite/webhook",
+  requireAuth,
+  requirePermission("workspace.manage"),
+  asyncHandler(async (_req, res) => {
+    res.json({ success: true, data: await ensureEventbriteWebhook() });
+  }),
+);
+// WhatsApp set-up check for the team (27 Nov b, B1). Never 503: not set up -> configured false.
+r.get(
+  "/whatsapp/status",
+  requireAuth,
+  requirePermission("workspace.manage"),
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await whatsappStatus(req.workspaceId, { fresh: String(req.query.fresh) === "true" }) });
+  }),
+);
 r.get("/docusign/consent-url", requireAuth, getDocuSignConsentUrl);
 r.post(
   "/docusign/agreements/:agreementId/send",

@@ -79,6 +79,11 @@ export const env = {
   WHATSAPP_PHONE_NUMBER_ID: process.env.WHATSAPP_PHONE_NUMBER_ID || "",
   WHATSAPP_BUSINESS_ACCOUNT_ID: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || "",
   WHATSAPP_WORKSPACE_ID: process.env.WHATSAPP_WORKSPACE_ID || "",
+  // Eventbrite (27 Nov b, A). Token: Account settings > Developer links > API keys > Private token.
+  EVENTBRITE_PRIVATE_TOKEN: process.env.EVENTBRITE_PRIVATE_TOKEN || "",
+  EVENTBRITE_ORGANIZATION_ID: process.env.EVENTBRITE_ORGANIZATION_ID || "",
+  // Long random string in the webhook URL (Eventbrite webhooks aren't signed).
+  EVENTBRITE_WEBHOOK_SECRET: process.env.EVENTBRITE_WEBHOOK_SECRET || "",
   META_APP_ID: process.env.META_APP_ID || "",
   META_APP_SECRET: process.env.META_APP_SECRET || "",
   META_GRAPH_API_VERSION: process.env.META_GRAPH_API_VERSION || "v26.0",

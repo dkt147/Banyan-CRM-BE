@@ -9,6 +9,7 @@ import { getWpBookingContext, runWpBookingSyncJob } from "./services/wpRoomBooki
 import { runPartnerBlocksJob } from "./services/partnerBlocks.service.js";
 import { relabelTestEvents } from "./services/roomCalendar.service.js";
 import { runXeroInvoiceSyncJob } from "./services/xeroInvoiceSync.service.js";
+import { runEventbriteSyncJob } from "./services/eventbriteSync.service.js";
 await connectDatabase();
 app.listen(env.PORT, () => {
   console.log(`Banyan API listening on ${env.PORT}`);
@@ -27,6 +28,9 @@ app.listen(env.PORT, () => {
   // Invoices made in Xero -> CRM (26 Nov, E), every 30 minutes while Xero is connected.
   setTimeout(() => runXeroInvoiceSyncJob(), 150_000);
   setInterval(() => runXeroInvoiceSyncJob(), 30 * 60 * 1000).unref();
+  // Eventbrite events and sign-ups (27 Nov b, A): 2 minutes after boot, then every 30 minutes.
+  setTimeout(() => runEventbriteSyncJob(), 120_000);
+  setInterval(() => runEventbriteSyncJob(), 30 * 60 * 1000).unref();
   // WordPress room bookings: updated_since reconciliation (first run backfills). Needs BANYAN_CRM_TOKEN.
   if (env.BANYAN_BOOKING_SYNC_MINUTES > 0) {
     setTimeout(() => runWpBookingSyncJob(), 20_000);

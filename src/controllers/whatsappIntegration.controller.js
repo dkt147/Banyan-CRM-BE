@@ -14,6 +14,9 @@ import { Message } from "../models/Message.js";
 import { WebhookEvent } from "../models/WebhookEvent.js";
 import { User } from "../models/User.js";
 import { Task } from "../models/Task.js";
+import {
+  conversationForContact, loadContact, logWhatsAppSent, parseSendBody, phoneVariants, sendViaMeta, templateText,
+} from "../services/whatsapp.service.js";
 
 function digits(value) {
   return String(value || "").replace(/\D/g, "");
@@ -36,66 +39,24 @@ function verifyMetaSignature(rawBody, signature, secret) {
   );
 }
 
+// POST /integrations/whatsapp/messages (27 Nov b, B2): { to, text } or { to, template: { name, language,
+// params } }, with an optional conversationId or contactId. With a contactId the message is saved in
+// the contact's WhatsApp thread (the Inbox and the contact's WhatsApp tab) and logged on the timeline.
 export const sendWhatsAppMessage = asyncHandler(async (req, res) => {
   requireEnvironment("WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID");
-  const to = digits(req.body?.to);
-  const text = String(req.body?.text || "").trim();
-  if (to.length < 8 || to.length > 15) {
-    throw new AppError(
-      "to must be a phone number in international format.",
-      400,
-      "INVALID_WHATSAPP_RECIPIENT",
-    );
-  }
-  if (!text)
-    throw new AppError("text is required.", 400, "WHATSAPP_TEXT_REQUIRED");
-  if (text.length > 4096)
-    throw new AppError(
-      "WhatsApp text messages must not exceed 4096 characters.",
-      400,
-      "WHATSAPP_TEXT_TOO_LONG",
-    );
+  const { to, text, template } = parseSendBody(req.body || {});
   let conversation = null;
+  let contact = null;
   if (req.body?.conversationId) {
-    conversation = await Conversation.findOne({
-      _id: req.body.conversationId,
-      workspaceId: req.workspaceId,
-    });
-    if (!conversation)
-      throw new AppError("Conversation not found.", 404, "NOT_FOUND");
+    conversation = await Conversation.findOne({ _id: req.body.conversationId, workspaceId: req.workspaceId }).catch(() => null);
+    if (!conversation) throw new AppError("Conversation not found.", 404, "NOT_FOUND");
   }
+  if (req.body?.contactId) contact = await loadContact(req.workspaceId, req.body.contactId);
 
-  const version = String(env.META_GRAPH_API_VERSION || "v26.0").replace(
-    /^v?/,
-    "v",
-  );
-  const result = await providerJson(
-    `https://graph.facebook.com/${version}/${encodeURIComponent(env.WHATSAPP_PHONE_NUMBER_ID)}/messages`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}`,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: JSON.stringify({
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to,
-        type: "text",
-        text: { preview_url: false, body: text },
-      }),
-    },
-    "WhatsApp Business",
-  );
-  const providerMessageId = result?.messages?.[0]?.id;
-  if (!providerMessageId)
-    throw new AppError(
-      "WhatsApp did not return a message ID.",
-      502,
-      "WHATSAPP_MESSAGE_ID_MISSING",
-    );
+  const { providerMessageId } = await sendViaMeta({ to, text, template });
+  const storedText = template ? await templateText(template) : text;
 
+  if (!conversation && contact) conversation = await conversationForContact(req.workspaceId, contact, to);
   let savedMessage = null;
   if (conversation) {
     savedMessage = await Message.create({
@@ -104,29 +65,30 @@ export const sendWhatsAppMessage = asyncHandler(async (req, res) => {
       direction: "outbound",
       senderName: req.user.name,
       senderAddress: req.user.phone || req.user.email,
-      body: text,
+      body: storedText.slice(0, 10000),
       status: "sent",
       metadata: {
         provider: "whatsapp",
         whatsappMessageId: providerMessageId,
         recipient: to,
+        ...(template ? { template: { name: template.name, language: template.language, params: template.params } } : {}),
       },
     });
     conversation.lastMessageAt = new Date();
     await conversation.save();
   }
+  if (contact) await logWhatsAppSent(req.workspaceId, req.user, contact, conversation, storedText);
 
-  res
-    .status(201)
-    .json({
-      success: true,
-      data: {
-        messageId: providerMessageId,
-        recipient: to,
-        status: "sent",
-        message: savedMessage,
-      },
-    });
+  res.status(201).json({
+    success: true,
+    data: {
+      messageId: providerMessageId,
+      recipient: to,
+      status: "sent",
+      conversationId: conversation ? String(conversation._id) : null,
+      message: savedMessage,
+    },
+  });
 });
 
 export const receiveWhatsAppWebhookAndSync = asyncHandler(async (req, res) => {
@@ -244,9 +206,13 @@ export const receiveWhatsAppWebhookAndSync = asyncHandler(async (req, res) => {
           });
           if (existingMessage) continue;
 
+          // With and without the 852 prefix, and the normalised digits every contact carries (27 Nov b, B3).
+          const variants = phoneVariants(from);
+          const forms = variants.flatMap((v) => [v, `+${v}`]);
           const contactQueries = [
-            { whatsapp: { $in: [from, `+${from}`] } },
-            { phone: { $in: [from, `+${from}`] } },
+            { phoneNormalized: { $in: variants } },
+            { whatsapp: { $in: forms } },
+            { phone: { $in: forms } },
           ];
           if (configuredIntegration?.workspaceId) {
             contactQueries.forEach((query) => {
@@ -396,6 +362,12 @@ export const verifyWhatsAppWebhookAndRespond = (req, res) => {
     safeEqual(token, verifyToken) &&
     challenge
   ) {
+    // Remembered for GET /integrations/whatsapp/status (webhookVerified). One row per day at most.
+    WebhookEvent.updateOne(
+      { provider: "whatsapp", externalEventId: `verify:${new Date().toISOString().slice(0, 10)}` },
+      { $setOnInsert: { provider: "whatsapp", eventType: "webhook.verified", status: "processed", processedAt: new Date() } },
+      { upsert: true },
+    ).catch(() => {});
     return res.status(200).type("text/plain").send(String(challenge));
   }
   return res

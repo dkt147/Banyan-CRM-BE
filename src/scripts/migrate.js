@@ -17,8 +17,9 @@ import * as dayPassPurchases from "../migrations/20261118-day-pass-purchases.js"
 import * as creditsLoyalty from "../migrations/20261119-credits-loyalty.js";
 import * as dayPassesDates from "../migrations/20261125-day-passes-dates.js";
 import * as notesTagsBirthdays from "../migrations/20261127-notes-tags-birthdays.js";
+import * as stageFollowUps from "../migrations/20261127b-stage-followups.js";
 
-const MIGRATIONS = [phase1, wpRoomBookings, crmFeedback, dayPassPurchases, creditsLoyalty, dayPassesDates, notesTagsBirthdays];
+const MIGRATIONS = [phase1, wpRoomBookings, crmFeedback, dayPassPurchases, creditsLoyalty, dayPassesDates, notesTagsBirthdays, stageFollowUps];
 
 const args = new Set(process.argv.slice(2));
 const apply = args.has("--apply");
