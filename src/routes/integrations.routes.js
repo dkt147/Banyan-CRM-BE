@@ -2,6 +2,7 @@ import { Router } from "express";
 import { requireAuth, requirePermission } from "../middleware/auth.middleware.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { flodeskStatus } from "../services/flodesk.service.js";
+import { syncXeroInvoices } from "../services/xeroInvoiceSync.service.js";
 import { resourceRouter } from "./resource.routes.js";
 import { resourceRegistry } from "../utils/resourceRegistry.js";
 import {
@@ -45,6 +46,15 @@ r.get("/docusign/callback", docusignCallback);
 
 // Provider operational APIs are kept separate from the generic integration CRUD endpoints.
 r.get("/xero/status", requireAuth, getXeroStatus);
+// Pull invoices made in Xero into the CRM (26 Nov, E). Read-only towards Xero.
+r.post(
+  "/xero/sync-invoices",
+  requireAuth,
+  requirePermission("workspace.manage"),
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await syncXeroInvoices(req.workspaceId) });
+  }),
+);
 r.post("/xero/invoices/:invoiceId/sync", requireAuth, syncXeroInvoice);
 r.get("/xero/invoices/:invoiceId", requireAuth, getXeroInvoice);
 r.post("/google/gmail/send", requireAuth, sendGmailMessage);

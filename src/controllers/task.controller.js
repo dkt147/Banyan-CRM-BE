@@ -98,7 +98,7 @@ export const updateTaskController = asyncHandler(async (req, res) => {
 
   const data = updateTaskSchema.parse(req.body);
 
-  const task = await updateTask(taskId, req.workspaceId, data);
+  const task = await updateTask(taskId, req.workspaceId, data, req.user._id);
 
   return res.status(200).json({
     success: true,
@@ -118,7 +118,7 @@ export const completeTaskController = asyncHandler(async (req, res) => {
   // an unexpected body according to the existing schema.
   completeTaskSchema.parse(req.body || {});
 
-  const task = await completeTask(taskId, req.workspaceId);
+  const task = await completeTask(taskId, req.workspaceId, req.user._id);
 
   return res.status(200).json({
     success: true,
@@ -136,7 +136,7 @@ export const snoozeTaskController = asyncHandler(async (req, res) => {
 
   const { snoozedUntil } = snoozeTaskSchema.parse(req.body);
 
-  const task = await snoozeTask(taskId, req.workspaceId, snoozedUntil);
+  const task = await snoozeTask(taskId, req.workspaceId, snoozedUntil, req.user._id);
 
   return res.status(200).json({
     success: true,

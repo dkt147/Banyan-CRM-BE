@@ -243,6 +243,8 @@ export const getXeroStatus = asyncHandler(async (req, res) => {
       tenantId:
         integration.config?.tenantId || integration.externalAccountId || null,
       lastSyncedAt: integration.lastSyncedAt || null,
+      // Xero -> CRM invoice pull (26 Nov, E): { lastSyncAt, lastResult, lastError }.
+      invoiceSync: integration.config?.invoiceSync || null,
     },
   });
 });

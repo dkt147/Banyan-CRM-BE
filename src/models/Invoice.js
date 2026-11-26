@@ -41,5 +41,6 @@ const schema = new mongoose.Schema(
   { timestamps: true },
 );
 schema.index({ workspaceId: 1, status: 1, dueAt: 1 });
+schema.index({ workspaceId: 1, provider: 1, externalId: 1 }); // Xero pull upsert (26 Nov, E)
 schema.index({ publicPaymentToken: 1 }, { unique: true, sparse: true });
 export const Invoice = mongoose.model("Invoice", schema);

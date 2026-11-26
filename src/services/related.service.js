@@ -19,6 +19,7 @@ import { displayStatus } from "./booking.service.js";
 
 export const RELATED_TYPES = ["contact", "company", "deal", "task", "booking"];
 const DEFAULT_LIMIT = 10;
+const ACTIVITY_LIMIT = 50; // detailed timeline (26 Nov, B2)
 
 const idOf = (value) => (value && typeof value === "object" && value._id ? value._id : value) || null;
 const str = (value) => (value ? String(value) : null);
@@ -231,20 +232,32 @@ export async function getRelatedRecords({ type, id, workspaceId, userId, limit =
       }),
     }),
     section(Activity, scope.activities, {
-      ...opts,
-      sort: { occurredAt: -1 },
-      select: "type subject body occurredAt dealId contactId",
+      limit: ACTIVITY_LIMIT,
+      sort: { occurredAt: -1, _id: -1 },
+      select: "type subject body occurredAt dealId contactId userId metadata.changes metadata.changed",
+      populate: [{ path: "userId", select: "name email" }],
       map: (a) => ({
         id: String(a._id),
         title: a.subject || String(a.type || "Activity").replace(/_/g, " "),
         subtitle: a.body ? String(a.body).slice(0, 140) : "",
         status: a.type,
+        type: a.type,
         date: a.occurredAt,
         dealId: str(idOf(a.dealId)),
         contactId: str(idOf(a.contactId)),
+        user: a.userId && a.userId._id ? { id: String(a.userId._id), name: a.userId.name || a.userId.email || "User" } : null,
+        changes: Array.isArray(a.metadata?.changes) ? a.metadata.changes : [],
+        changed: Array.isArray(a.metadata?.changed) ? a.metadata.changed : [],
+        ...(a.type === "note" ? { body: String(a.body || "").slice(0, 5000) } : {}),
       }),
     }),
   ]);
+
+  // Notes tab count (26 Nov, A): notes carry the contact, company and deal they belong to.
+  const noteKey = { contact: "contactId", company: "companyId", deal: "dealId" }[type];
+  const notes = {
+    total: noteKey ? await Activity.countDocuments({ workspaceId, type: "note", [noteKey]: entity._id }) : 0,
+  };
 
   // Contacts and companies: merge purchases into "Bookings & purchases", newest first.
   if (type === "contact" || type === "company") {
@@ -273,6 +286,6 @@ export async function getRelatedRecords({ type, id, workspaceId, userId, limit =
   return {
     entity: { type, id: String(entity._id), label },
     links,
-    sections: { bookings, deals, tasks, emails, whatsapp, files, activities },
+    sections: { bookings, deals, tasks, emails, whatsapp, files, activities, notes },
   };
 }

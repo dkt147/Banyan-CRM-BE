@@ -7,6 +7,20 @@ import { Activity } from "../models/Activity.js";
 import { Task } from "../models/Task.js";
 import { AppError } from "../utils/AppError.js";
 import { createdRangeFilter } from "../utils/createdRange.js";
+import { recordUpdate } from "./changeLog.service.js";
+
+/** Timeline title for a deal save (26 Nov, B1). */
+export function dealUpdateSubject(changes, before) {
+  const by = Object.fromEntries(changes.map((c) => [c.field, c]));
+  if (by.status) {
+    if (by.status.to === "Won") return "Deal marked won";
+    if (by.status.to === "Lost") return "Deal marked lost";
+    if (by.status.to === "Open" && ["won", "lost"].includes(before?.status)) return "Deal reopened";
+  }
+  if (by.pipelineId) return `Moved to ${by.pipelineId.to || "another pipeline"}`;
+  if (by.stageId && changes.length === 1) return "Stage changed";
+  return "Deal details updated";
+}
 import { fireDealTrigger } from "./automation.service.js";
 export async function listDeals(workspaceId, q = {}) {
   const page = Math.max(+q.page || 1, 1),
@@ -101,6 +115,7 @@ export async function createDeal(workspaceId, userId, payload) {
 export async function updateDeal(workspaceId, userId, id, payload) {
   const d = await Deal.findOne({ _id: id, workspaceId });
   if (!d) throw new AppError("Deal not found", 404, "NOT_FOUND");
+  const before = d.toObject({ depopulate: true });
   const patch = { ...payload };
   delete patch.workspaceId;
   delete patch.ownerId;
@@ -142,10 +157,12 @@ export async function updateDeal(workspaceId, userId, id, payload) {
   Object.assign(d, patch);
   if (d.status === "won" && d.metadata) d.metadata.paymentReceivedConfirmed = true;
   await d.save();
-  await Activity.create({
-    workspaceId, userId, type: "deal_updated", dealId: d._id, contactId: d.contactId,
-    companyId: d.companyId, subject: "Deal updated",
-    metadata: { changed: Object.keys(payload), previousPipelineId: oldPipelineId, pipelineChanged: String(d.pipelineId) !== oldPipelineId },
+  // One activity per save with every real change (none when nothing changed).
+  await recordUpdate({
+    workspaceId, userId, type: "deal_updated", before, after: d, currency: d.currency,
+    subject: (changes) => dealUpdateSubject(changes, before),
+    links: { dealId: d._id, contactId: d.contactId, companyId: d.companyId },
+    extraMeta: { previousPipelineId: oldPipelineId, pipelineChanged: String(d.pipelineId) !== oldPipelineId },
   });
   if (newStage && stageChanged) {
     await runStageFollowUpAutomation(d, userId, newStage, workspaceId).catch((error) => console.error("[deal-automation]", error.message));

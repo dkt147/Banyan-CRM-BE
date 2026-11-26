@@ -11,7 +11,9 @@ import {
 } from "../controllers/contact.controller.js";
 import { getContactTagCounts } from "../services/contact.service.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
-import { MAX_TAGS_PER_CONTACT, TAG_CATALOGUE, TAG_PATTERN } from "../utils/contactTags.js";
+import { MAX_TAGS_PER_CONTACT, TAG_PATTERN } from "../utils/contactTags.js";
+import { listContactTags } from "../services/contactTags.service.js";
+import { contactBirthdays } from "../services/birthdays.service.js";
 
 const router = Router();
 
@@ -29,9 +31,22 @@ router.get(
     res.json({ success: true, data: { tags: await getContactTagCounts(req.workspaceId) } });
   }),
 );
-router.get("/tag-catalogue", (_req, res) => {
-  res.json({ success: true, data: { pattern: TAG_PATTERN.source, maxPerContact: MAX_TAGS_PER_CONTACT, tags: TAG_CATALOGUE } });
-});
+// The workspace's editable tag list (26 Nov, D), archived ones included (isActive: false) so their
+// labels still show on contacts that have them.
+router.get(
+  "/tag-catalogue",
+  asyncHandler(async (req, res) => {
+    const tags = await listContactTags(req.workspaceId, { includeInactive: true });
+    res.json({ success: true, data: { pattern: TAG_PATTERN.source, maxPerContact: MAX_TAGS_PER_CONTACT, tags } });
+  }),
+);
+// Birthdays today and in the next ?days= days (26 Nov, C).
+router.get(
+  "/birthdays",
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await contactBirthdays(req.workspaceId, { days: req.query.days }) });
+  }),
+);
 
 router.get("/:contactId", getContactController);
 

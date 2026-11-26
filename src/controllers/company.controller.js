@@ -69,7 +69,7 @@ export async function updateCompanyController(req, res) {
 
   const data = updateCompanySchema.parse(req.body);
 
-  const company = await updateCompany(companyId, req.user.workspaceId, data);
+  const company = await updateCompany(companyId, req.user.workspaceId, data, req.user._id);
 
   return res.status(200).json({
     success: true,

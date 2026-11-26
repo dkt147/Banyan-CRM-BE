@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { createdRangeFilter } from "../utils/createdRange.js";
+import { recordUpdate } from "./changeLog.service.js";
 import { Contact } from "../models/Contact.js";
 import { Company } from "../models/Company.js";
 import { Deal } from "../models/Deal.js";
@@ -210,7 +211,7 @@ export async function getContactById(contactId, workspaceId) {
   return contact;
 }
 
-export async function updateContact(contactId, workspaceId, data) {
+export async function updateContact(contactId, workspaceId, data, userId = null) {
   if (data.companyId) {
     const company = await Company.findOne({
       _id: data.companyId,
@@ -220,6 +221,11 @@ export async function updateContact(contactId, workspaceId, data) {
     if (!company) {
       throw new AppError("Company not found.", 404, "COMPANY_NOT_FOUND");
     }
+  }
+
+  const before = await Contact.findOne({ _id: contactId, workspaceId }).lean();
+  if (!before) {
+    throw new AppError("Contact not found.", 404, "CONTACT_NOT_FOUND");
   }
 
   const contact = await Contact.findOneAndUpdate(
@@ -239,6 +245,13 @@ export async function updateContact(contactId, workspaceId, data) {
   if (!contact) {
     throw new AppError("Contact not found.", 404, "CONTACT_NOT_FOUND");
   }
+
+  // Timeline (26 Nov, B1): what changed, by whom.
+  await recordUpdate({
+    workspaceId, userId, type: "contact_updated", before, after: contact.toObject({ depopulate: true }),
+    subject: (changes) => (changes.length === 1 && changes[0].field === "tags" ? "Tags changed" : "Contact updated"),
+    links: { contactId: contact._id, companyId: contact.companyId?._id || contact.companyId || undefined },
+  });
 
   return contact;
 }

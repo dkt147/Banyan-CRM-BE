@@ -59,7 +59,7 @@ export async function updateContactController(req, res) {
 
   const data = updateContactSchema.parse(req.body);
 
-  const contact = await updateContact(contactId, req.user.workspaceId, data);
+  const contact = await updateContact(contactId, req.user.workspaceId, data, req.user._id);
 
   return res.status(200).json({
     success: true,

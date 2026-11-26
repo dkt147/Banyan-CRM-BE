@@ -8,6 +8,7 @@ import { runScheduledAutomations } from "./services/automation.service.js";
 import { getWpBookingContext, runWpBookingSyncJob } from "./services/wpRoomBooking.service.js";
 import { runPartnerBlocksJob } from "./services/partnerBlocks.service.js";
 import { relabelTestEvents } from "./services/roomCalendar.service.js";
+import { runXeroInvoiceSyncJob } from "./services/xeroInvoiceSync.service.js";
 await connectDatabase();
 app.listen(env.PORT, () => {
   console.log(`Banyan API listening on ${env.PORT}`);
@@ -23,6 +24,9 @@ app.listen(env.PORT, () => {
   // Time-based automation rules (e.g. "deal inactive for 5 days") are checked every 15 minutes.
   setTimeout(() => runScheduledAutomations(), 60_000);
   setInterval(() => runScheduledAutomations(), 15 * 60 * 1000).unref();
+  // Invoices made in Xero -> CRM (26 Nov, E), every 30 minutes while Xero is connected.
+  setTimeout(() => runXeroInvoiceSyncJob(), 150_000);
+  setInterval(() => runXeroInvoiceSyncJob(), 30 * 60 * 1000).unref();
   // WordPress room bookings: updated_since reconciliation (first run backfills). Needs BANYAN_CRM_TOKEN.
   if (env.BANYAN_BOOKING_SYNC_MINUTES > 0) {
     setTimeout(() => runWpBookingSyncJob(), 20_000);

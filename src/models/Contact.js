@@ -32,6 +32,9 @@ const schema = new mongoose.Schema(
       index: true,
     },
     notes: String,
+    // "MM-DD" or "YYYY-MM-DD" (26 Nov, C); birthdayMonthDay is derived for "birthdays this week".
+    birthday: { type: String, default: null },
+    birthdayMonthDay: { type: String, default: null },
     isArchived: { type: Boolean, default: false, index: true },
     // Monthly meeting-room allowance in hours (0 = no credit tracking).
     meetingRoomCreditHours: { type: Number, default: 0, min: 0 },
@@ -54,6 +57,21 @@ schema.pre("validate", function setPhoneNormalized() {
   if (this.isModified("phone") || this.isModified("whatsapp") || this.isNew)
     this.phoneNormalized = normalizePhone(this.phone) || normalizePhone(this.whatsapp);
 });
+schema.pre("validate", function setBirthdayMonthDay() {
+  if (this.isModified("birthday") || this.isNew) this.birthdayMonthDay = this.birthday ? String(this.birthday).slice(-5) : null;
+});
+function syncBirthdayOnUpdate() {
+  const update = this.getUpdate() || {};
+  const set = update.$set || update;
+  if (!("birthday" in set) || set.birthday === undefined) return;
+  const md = set.birthday ? String(set.birthday).slice(-5) : null;
+  if (update.$set) update.$set.birthdayMonthDay = md;
+  else update.birthdayMonthDay = md;
+  this.setUpdate(update);
+}
+schema.pre("findOneAndUpdate", syncBirthdayOnUpdate);
+schema.pre("updateOne", syncBirthdayOnUpdate);
+schema.pre("updateMany", syncBirthdayOnUpdate);
 // Keep phoneNormalized in sync for findOneAndUpdate/updateOne paths used by services.
 function syncPhoneOnUpdate() {
   const update = this.getUpdate() || {};
@@ -73,6 +91,7 @@ schema.pre("findOneAndUpdate", syncPhoneOnUpdate);
 schema.pre("updateOne", syncPhoneOnUpdate);
 schema.index({ workspaceId: 1, email: 1 });
 schema.index({ workspaceId: 1, createdAt: -1 });
+schema.index({ workspaceId: 1, birthdayMonthDay: 1 });
 schema.index({ workspaceId: 1, phoneNormalized: 1 });
 schema.index({ workspaceId: 1, lastEngagedAt: 1 });
 // The contact's own `language` field ("zh", …) must not be read as the text-search

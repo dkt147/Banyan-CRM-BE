@@ -1,4 +1,5 @@
 import { Company } from "../models/Company.js";
+import { recordUpdate } from "./changeLog.service.js";
 import { Contact } from "../models/Contact.js";
 import { Deal } from "../models/Deal.js";
 import { AppError } from "../utils/AppError.js";
@@ -83,7 +84,8 @@ export async function getCompanyById(companyId, ownerId, workspaceId) {
   return company;
 }
 
-export async function updateCompany(companyId, workspaceId, data) {
+export async function updateCompany(companyId, workspaceId, data, userId = null) {
+  const before = await Company.findOne({ _id: companyId, workspaceId }).lean();
   const company = await Company.findOneAndUpdate(
     {
       _id: companyId,
@@ -101,6 +103,13 @@ export async function updateCompany(companyId, workspaceId, data) {
   if (!company) {
     throw new AppError("Company not found.", 404, "COMPANY_NOT_FOUND");
   }
+
+  // Timeline (26 Nov, B1).
+  await recordUpdate({
+    workspaceId, userId, type: "company_updated", before, after: company.toObject({ depopulate: true }),
+    subject: (changes) => (changes.length === 1 && changes[0].field === "tags" ? "Tags changed" : "Company updated"),
+    links: { companyId: company._id },
+  });
 
   return company;
 }

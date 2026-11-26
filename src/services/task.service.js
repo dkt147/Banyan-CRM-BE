@@ -6,6 +6,7 @@ import { Activity } from "../models/Activity.js";
 import { Workspace } from "../models/Workspace.js";
 import { AppError } from "../utils/AppError.js";
 import { escapeRegex } from "../utils/phone.js";
+import { recordUpdate } from "./changeLog.service.js";
 
 const QUIET_DEAL_DAYS = 5;
 
@@ -310,7 +311,7 @@ export async function getTaskById(taskId, workspaceId) {
   return task;
 }
 
-export async function updateTask(taskId, workspaceId, data) {
+export async function updateTask(taskId, workspaceId, data, userId = null) {
   const task = await Task.findOne({
     _id: taskId,
     workspaceId,
@@ -331,6 +332,7 @@ export async function updateTask(taskId, workspaceId, data) {
     data.completedAt = null;
   }
 
+  const before = task.toObject({ depopulate: true });
   const updatedTask = await Task.findByIdAndUpdate(
     taskId,
     {
@@ -342,17 +344,25 @@ export async function updateTask(taskId, workspaceId, data) {
     },
   );
 
+  // Timeline (26 Nov, B1).
+  await recordUpdate({
+    workspaceId, userId, type: "task_updated", before, after: updatedTask.toObject({ depopulate: true }),
+    subject: (changes) => (changes.some((c) => c.field === "status" && c.to === "Completed") ? "Task completed" : "Task updated"),
+    links: { contactId: updatedTask.contactId, companyId: updatedTask.companyId, dealId: updatedTask.dealId },
+    extraMeta: { taskId: updatedTask._id, taskTitle: updatedTask.title },
+  });
+
   return getTaskById(updatedTask._id, workspaceId);
 }
 
-export async function completeTask(taskId, workspaceId) {
+export async function completeTask(taskId, workspaceId, userId = null) {
   return updateTask(taskId, workspaceId, {
     status: "completed",
     completedAt: new Date(),
-  });
+  }, userId);
 }
 
-export async function snoozeTask(taskId, workspaceId, snoozedUntil) {
+export async function snoozeTask(taskId, workspaceId, snoozedUntil, userId = null) {
   if (!snoozedUntil) {
     throw new AppError(
       "snoozedUntil is required.",
@@ -370,7 +380,7 @@ export async function snoozeTask(taskId, workspaceId, snoozedUntil) {
   return updateTask(taskId, workspaceId, {
     status: "snoozed",
     snoozedUntil: date,
-  });
+  }, userId);
 }
 
 export async function deleteTask(taskId, workspaceId) {

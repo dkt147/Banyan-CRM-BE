@@ -33,4 +33,8 @@ const schema = new mongoose.Schema(
   { timestamps: true },
 );
 schema.index({ workspaceId: 1, occurredAt: -1 });
+// Notes tab and timeline lookups (26 Nov, A).
+schema.index({ workspaceId: 1, type: 1, contactId: 1, occurredAt: -1 });
+schema.index({ workspaceId: 1, type: 1, companyId: 1, occurredAt: -1 });
+schema.index({ workspaceId: 1, type: 1, dealId: 1, occurredAt: -1 });
 export const Activity = mongoose.model("Activity", schema);

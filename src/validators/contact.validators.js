@@ -3,6 +3,7 @@ import { z } from "zod";
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid ID");
 
 import { MAX_TAGS_PER_CONTACT, TAG_PATTERN, normalizeTag, normalizeTags } from "../utils/contactTags.js";
+import { normalizeBirthday } from "../utils/birthday.js";
 
 // Tags: catalogue keys or custom snake_case keys. Input is normalised first ("Active Member" ->
 // "active_member"), then validated, so the stored list is always clean. A value with nothing usable
@@ -57,6 +58,12 @@ export const createContactSchema = z.object({
   language: z.string().trim().min(2).max(10).default("en"),
 
   notes: z.string().trim().max(5000).nullable().optional(),
+
+  // "MM-DD" or "YYYY-MM-DD"; checked as a real date by normalizeBirthday (400 INVALID_BIRTHDAY).
+  birthday: z
+    .union([z.string().max(20), z.null()])
+    .optional()
+    .transform((v) => normalizeBirthday(v)),
 
   isArchived: z.boolean().optional(),
 });
