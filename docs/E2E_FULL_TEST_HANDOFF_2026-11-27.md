@@ -12,7 +12,7 @@ Report everything that's wrong, confusing or slow.
 
 **Logins:** the developer gives you an **admin** CRM login separately. Never write it in your report or screenshots.
 
-**New features that need the server update:** Notes, the detailed timeline, Birthdays and Contact tags. If you see "…needs the latest server update", mark that test **Blocked (server)** and move on. Don't count it as a fail.
+**New features that need the server update:** Notes, the detailed timeline, Birthdays, Contact tags, Events (Eventbrite), the WhatsApp and Eventbrite status cards, WhatsApp templates, and the per-stage follow-up task setting. If you see "…needs the latest server update", mark that test **Blocked (server)** and move on. Don't count it as a fail.
 
 ---
 
@@ -125,7 +125,8 @@ Open `TEST QA full`.
 | 6.5 | Add a note on the deal. Open its contact → Notes. | The deal note appears on the contact too, labelled "On deal: …". |
 | 6.6 | **Mark won** without ticking payment received, then with it. **Reopen.** **Mark lost** without a reason, then with one. | Clear messages when the payment tick or the reason is missing. Each change is on the timeline. |
 | 6.7 | Pipelines (board): find your TEST deal and drag it one stage (TEST only). | Moves and stays after reload. |
-| 6.8 | Tasks tab on the deal. | Shows the automatic follow-up task(s) for the stage change. Note how many were created (the client is still deciding about these). |
+| 6.8 | Tasks tab on the deal, after the moves in 6.3 and 6.7. | **New rule:** a stage change only creates an automatic task if that stage has "Follow-up task" switched on. By default, only **Quote sent** has it (task due in 3 days). Moving to any other stage creates **no** automatic task; you're asked "What's next?" instead. Note exactly which tasks were created. *(Before the server update, every move still creates one; report it as Blocked (server).)* |
+| 6.9 | Pipelines → open a stage's **Edit** (look only, **Cancel**, don't Save). | The stage window has a **Follow-up task** box: a tick box, "Due after (days)" and an optional title. Quote sent shows it ticked with 3 days; the board card says "Task in 3 d". Don't change any stage. |
 
 ## 7. Tasks
 
@@ -146,7 +147,10 @@ Use only your own address and number.
 | 8.2 | From `TEST QA full` (your `+full` email): send an email, e.g. from the Inbox (new message) or the contact's Emails tab, subject "TEST QA email". | It arrives in your mailbox **from info@banyanworkspace.com**. In the CRM it's in the Inbox and on the contact's **Emails** tab. |
 | 8.3 | Reply to it from your mailbox. | Within a few minutes the reply shows in the same CRM thread. |
 | 8.4 | Use an **email template** for the email (Templates, TEST one from §9). | The merge fields (first name and so on) are filled. |
-| 8.5 | WhatsApp: Integrations shows whether WhatsApp is connected. If it **is**, send a WhatsApp to **your own** number on a TEST contact. | It arrives. Your reply shows in the CRM. If it **isn't** connected: mark Blocked and note what the Integrations page says. |
+| 8.5 | Settings → Integrations → **WhatsApp Business** card. | Says Connected or Not connected, with the business number, whether incoming messages arrive, and the number of approved templates. Note exactly what it says. |
+| 8.5a | Only if connected: put **your own** WhatsApp number on `TEST QA full` (WhatsApp field). Click **WhatsApp** at the top of the contact. Send a **template** (fill the blanks). | The message arrives on your phone. It shows on the contact's **WhatsApp** tab and in the Inbox, and the Activity tab says "WhatsApp sent". |
+| 8.5b | Reply to it from your phone, then send **free text** from the CRM within 24 hours. | Your reply shows in the CRM thread. The free text arrives. |
+| 8.5c | Free text to your number when you haven't messaged in 24 hours (skip if not possible). | A clear message: use a template. |
 | 8.6 | Notifications (bell). | New inbound messages notify. |
 
 ## 9. Templates and forms
@@ -176,6 +180,7 @@ Use only your own address and number.
 | 11.3 | Room calendar settings. | Blocking is **off**, and the Library is unticked. The "Google Calendar → website blocks" panel shows "Rooms checked" on **Preview** (Preview only). |
 | 11.4 | **Only if ticked in §0:** on banyanworkspace.com, book the **small meeting room** at least **14 days ahead** on a free weekday slot, 1 hour, name `TEST QA booking`, your `+booking` email, Stripe test card 4242 4242 4242 4242. **Don't cancel or delete it afterwards.** | Payment succeeds. You get a confirmation email. It appears in CRM Meeting rooms within a few minutes, with the right time, room, amount and the "Test" badge, and in the small room's Google Calendar. Write down every step and any error exactly: the client says this flow "doesn't seem to work". |
 | 11.5 | Bookings list (other bookings). | Loads. The filters work. |
+| 11.6 | CRM: Meeting rooms → **New booking**. Pick the **small** room, a free weekday slot ≥14 days ahead, 1 hour. Go to step 2, choose your TEST contact. **Stop there: close the window, don't click "Create payment link".** | Availability loads; booked hours are greyed. Step 2 fills the contact's details and shows the HK$ total. The button says **Create payment link** (not "Redirecting…"). Note anything that blocks or confuses you; this is the flow the client says doesn't work. |
 
 ## 12. Memberships, invoices, payments, agreements (look only)
 
@@ -234,6 +239,19 @@ Use only your own address and number.
 | 17.3 | Phone width (DevTools, 390 px) and iPad (1024 px): Dashboard, Contacts, the contact page with tabs, Deals and Tasks. | No sideways scrolling. The tabs scroll sideways if needed. The buttons are tappable. |
 | 17.4 | Speed: note any screen that takes over 3 s. | — |
 
+## 17A. Events (Eventbrite) and integrations
+
+New on 27 Nov: the CRM reads Eventbrite events and sign-ups. **Look only:** don't create, change or cancel anything on Eventbrite, and don't click **Sync now** unless the developer says so.
+
+| # | Test | Expected |
+|---|---|---|
+| 17A.1 | Sidebar → **Events**. | The list loads with Upcoming / Past / All and search. If the server isn't updated: a "needs the latest server update" notice (Blocked (server)). |
+| 17A.2 | Open one event. | Date, venue, "Signed up", "Checked in", the attendee table with ticket, status and links to contacts; "Open in Eventbrite" opens the right event. |
+| 17A.3 | Open 2 attendees' contacts (look only). | Tagged **Eventbrite**; the **Events** tab lists the sign-up; Activity shows "Signed up for …". |
+| 17A.4 | A company with attendees → **Events** tab. | Lists its people's sign-ups with their names. |
+| 17A.5 | Settings → Integrations → **Eventbrite** card. | Connected or Not connected, organisation name, whether new sign-ups arrive straight away, and the last sync with counts. Note exactly what it says. |
+| 17A.6 | Settings → Contact tags. | "Eventbrite" is listed under Sources. |
+
 ## 18. Clean-up (before you report)
 
 - [ ] `TEST QA tag renamed` is **archived**.
@@ -260,6 +278,7 @@ Send back `E2E_FULL_TEST_REPORT_2026-11-27.md` with:
 5. **Data questions:**
    - Do real members show a membership?
    - Do real clients show Xero invoices?
-   - How many follow-up tasks did one stage change create?
+   - Which automatic tasks did each stage change create (6.8)?
+   - Do Eventbrite attendees appear as contacts, and are any duplicated?
 6. **Small things:** wording, slow screens, layout on phone or iPad.
 7. **The clean-up list.**
