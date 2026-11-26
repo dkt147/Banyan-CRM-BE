@@ -97,7 +97,8 @@ Open `TEST QA full`.
 | 4.7 | Clear the birthday (empty, Save). | It shows "—". |
 | 4.8 | **Activity** tab after 4.3–4.7. | Entries such as "Contact updated", with **who** did it and **old → new** values ("Birthday: empty → 14 Mar"). The filter chips (All, Notes, Changes, Other) work. *(Blocked (server) if only "Contact updated" with no detail.)* |
 | 4.9 | Tags: add **Prospect**, then remove it. | Saves. Activity shows "Tags changed". |
-| 4.10 | **Membership** card. | "Not a member" for your TEST contact. Also open 2–3 **real** contacts you know are members (look only). The card shows the plan, since, renews and monthly value, plus a "Member · <plan>" badge in the header. If every real member shows "Not a member", report it (it's a data question). |
+| 4.10 | **Membership** card on `TEST QA full`. | "Not a member", with an **Add membership** link. (The backend confirmed production has no memberships yet, so every real contact also says "Not a member". That's expected, not a fail.) |
+| 4.10a | **Add membership** on `TEST QA full`. Plan: an existing plan, or if the list is empty, **+ New plan…** named `TEST QA plan`, price 1. Status Active, today, renews in a month, monthly 1, keep "Tag the contact Active member" ticked. | Saves. The card shows the plan, Active, Since, Renews and HK$1. The header shows "Member · <plan>". The contact now has the **Active member** tag. |
 | 4.11 | **Invoices** tab on a real contact or company that has invoices (look only). | Lists number, amount, status, due or paid date. A Xero invoice opens in Xero in a new tab. If every client shows "No invoices yet", report it: the Xero pull sync isn't live yet. |
 | 4.12 | **New deal** from the contact: `TEST QA deal full`, value 1000. | The deal opens, linked to the contact. |
 | 4.13 | **Day pass credits** card (on `Qa TEST daypass`): add a 5-day package, then use a half day. | "4.5 days left. A low-balance email was sent…". You receive "Your Banyan day pass is running low". **Email balance** works too. *(This was blocked on 25 Nov by the Gmail API; it should work now.)* |
@@ -110,7 +111,7 @@ Open `TEST QA full`.
 | 5.1 | Create `TEST QA Co full`. Link `TEST QA full` to it (the contact's Company field). | Linked. The company shows the contact. |
 | 5.2 | Company page layout. | Same tabs as the contact page. |
 | 5.3 | **Notes** tab. | It also shows the notes you added on the contact, because they're linked to its company. Add a company note. |
-| 5.4 | **Memberships** card. | "No memberships for this company". On a real member company: the plan(s) and members (look only). |
+| 5.4 | **Memberships** card on `TEST QA Co full`. | Shows the membership from 4.10a with the member's name (if `TEST QA full` belongs to this company). **Add membership** offers a list of the company's people. Don't save a second one. |
 | 5.5 | **Meeting room credits** card on the TEST company: set the allowance to 2 h. Previous and next month. | Saves. The month buttons work. |
 | 5.6 | **New deal** from the company. | Stage is pre-filled (not empty). The contact is picked from its people. |
 
@@ -126,6 +127,7 @@ Open `TEST QA full`.
 | 6.6 | **Mark won** without ticking payment received, then with it. **Reopen.** **Mark lost** without a reason, then with one. | Clear messages when the payment tick or the reason is missing. Each change is on the timeline. |
 | 6.7 | Pipelines (board): find your TEST deal and drag it one stage (TEST only). | Moves and stays after reload. |
 | 6.8 | Tasks tab on the deal, after the moves in 6.3 and 6.7. | **New rule:** a stage change only creates an automatic task if that stage has "Follow-up task" switched on. By default, only **Quote sent** has it (task due in 3 days). Moving to any other stage creates **no** automatic task; you're asked "What's next?" instead. Note exactly which tasks were created. *(Before the server update, every move still creates one; report it as Blocked (server).)* |
+| 6.8a | Create `TEST QA membership deal` in the **Membership** pipeline for `TEST QA full`, then **Mark won** (tick Payment received). | A window "Deal won: add the membership" opens, with the deal value as the monthly price and the note "From deal: …". Click **Not now**: the stage bar shows an **Add membership** button. (Don't add a second membership; 4.10a already made one.) |
 | 6.9 | Pipelines → open a stage's **Edit** (look only, **Cancel**, don't Save). | The stage window has a **Follow-up task** box: a tick box, "Due after (days)" and an optional title. Quote sent shows it ticked with 3 days; the board card says "Task in 3 d". Don't change any stage. |
 
 ## 7. Tasks
@@ -257,6 +259,7 @@ New on 27 Nov: the CRM reads Eventbrite events and sign-ups. **Look only:** don'
 - [ ] `TEST QA tag renamed` is **archived**.
 - [ ] `TEST QA tier` is **inactive**.
 - [ ] The saved view `TEST QA view` is deleted.
+- [ ] The membership on `TEST QA full` is set to **Cancelled** (Memberships page → Edit), not deleted. If you created `TEST QA plan`, set it **inactive**.
 - [ ] No real record was edited, messaged, tagged or noted.
 - [ ] Calendar blocking is still off. Sync was never run. The Library was never touched.
 - [ ] No invoice, agreement or automation was created, sent or changed.
@@ -276,7 +279,7 @@ Send back `E2E_FULL_TEST_REPORT_2026-11-27.md` with:
 3. **Emails and WhatsApp:** each message sent and received, with subject, time, and whether it showed in the CRM.
 4. **§11.4 (if done):** every step, any error, the booking reference, and whether it reached the CRM and Google Calendar.
 5. **Data questions:**
-   - Do real members show a membership?
+   - Did adding a membership (4.10a, 6.8a) work end to end?
    - Do real clients show Xero invoices?
    - Which automatic tasks did each stage change create (6.8)?
    - Do Eventbrite attendees appear as contacts, and are any duplicated?
