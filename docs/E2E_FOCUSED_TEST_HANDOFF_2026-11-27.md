@@ -186,8 +186,9 @@ Production had no memberships, so the card says "Not a member" for every real co
 
 | # | Test | Expected |
 |---|---|---|
+| 12.0 | CRM → **Meeting rooms** page, top. | Note what the sync line says: "Synced from WordPress … · checks every 2 min" is good. A notice "Automatic WordPress sync is off" means the server setting isn't fixed yet: report it. |
 | 12.1 | CRM → Meeting rooms → **New booking**. Small room; a free weekday at least 14 days ahead; 1 hour. Go to step 2 and pick `TEST QA focus` in the contact search. **Stop: close the window. Don't click "Create payment link".** | Availability loads, with booked hours greyed out. Step 2 fills in the contact's details and shows the HK$ total. The button says **Create payment link**. Write down anything that blocks or confuses you, with the exact text. |
-| 12.2 | **Only if ticked in §0:** on **banyanworkspace.com**, book the **small meeting room** at least 14 days ahead on a free weekday slot, 1 hour. Name `TEST QA booking focus`, your `+booking` email, test card 4242 4242 4242 4242. **Don't cancel or delete it afterwards.** | Payment succeeds and you get a confirmation email. Within a few minutes it's in CRM Meeting rooms with the right room, time, amount and the "Test" badge, and in the small room's Google Calendar. **Write down every step and any error exactly.** |
+| 12.2 | **Only if ticked in §0:** (Stripe is in **test mode**: a real card is always declined. That's expected and may be what the client hit.) on **banyanworkspace.com**, book the **small meeting room** at least 14 days ahead on a free weekday slot, 1 hour. Name `TEST QA booking focus`, your `+booking` email, test card 4242 4242 4242 4242. **Don't cancel or delete it afterwards.** | Payment succeeds and you get a confirmation email. Within a few minutes it's in CRM Meeting rooms with the right room, time, amount and the "Test" badge, and in the small room's Google Calendar. **Write down every step and any error exactly.** |
 
 ## 13. Clean-up (before you report)
 
