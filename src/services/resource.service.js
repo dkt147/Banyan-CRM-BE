@@ -8,6 +8,7 @@ export function createResourceService(Model, config = {}) {
     ownerField = null,
     createdByField = null,
     softDeleteField = null,
+    validate = null, // optional (payload, existingDoc | null) => throws AppError
   } = config;
   function base(workspaceId) {
     return { workspaceId };
@@ -51,6 +52,7 @@ export function createResourceService(Model, config = {}) {
     return doc;
   }
   async function create(workspaceId, userId, payload) {
+    if (validate) validate(payload || {}, null);
     const data = { ...payload, workspaceId };
     if (ownerField && !data[ownerField]) data[ownerField] = userId;
     if (createdByField) data[createdByField] = userId;
@@ -63,6 +65,11 @@ export function createResourceService(Model, config = {}) {
       Object.entries(payload).filter(([k]) => !forbidden.has(k)),
     );
     if (createdByField) delete patch[createdByField];
+    if (validate) {
+      const existing = await Model.findOne({ _id: id, ...base(workspaceId) }).lean();
+      if (!existing) throw new AppError("Resource not found.", 404, "NOT_FOUND");
+      validate(patch, existing);
+    }
     const doc = await Model.findOneAndUpdate(
       { _id: id, ...base(workspaceId) },
       patch,

@@ -27,6 +27,7 @@ import { AuditLog } from "../models/AuditLog.js";
 import { Resource } from "../models/Resource.js";
 import { Form } from "../models/Form.js";
 import { createResourceService } from "../services/resource.service.js";
+import { validateMembership } from "./membershipValidation.js";
 const defs = {
   companies: [
     Company,
@@ -195,6 +196,7 @@ const defs = {
       filters: ["status", "contactId", "companyId", "planId", "riskLevel"],
       sortFields: ["renewalAt", "createdAt"],
       populate: ["contactId", "companyId", "planId"],
+      validate: validateMembership,
     },
   ],
   checkIns: [

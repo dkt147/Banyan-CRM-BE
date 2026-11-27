@@ -4,6 +4,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { flodeskStatus } from "../services/flodesk.service.js";
 import { syncXeroInvoices } from "../services/xeroInvoiceSync.service.js";
 import { whatsappStatus } from "../services/whatsapp.service.js";
+import { gmailDiagnostics } from "../services/gmailDiagnostics.service.js";
 import { ensureEventbriteWebhook, eventbriteStatus, syncEventbrite } from "../services/eventbriteSync.service.js";
 import { resourceRouter } from "./resource.routes.js";
 import { resourceRegistry } from "../utils/resourceRegistry.js";
@@ -62,6 +63,16 @@ r.get("/xero/invoices/:invoiceId", requireAuth, getXeroInvoice);
 r.post("/google/gmail/send", requireAuth, sendGmailMessage);
 r.post("/google/gmail/sync", requireAuth, syncGmailInbox);
 r.get("/google/gmail/messages", requireAuth, listGmailMessages);
+// Read-only delivery check (focused test 27 Nov, F1): ?ids=<gmail id>,<gmail id>&days=7
+r.get(
+  "/google/gmail/diagnostics",
+  requireAuth,
+  requirePermission("workspace.manage"),
+  asyncHandler(async (req, res) => {
+    const ids = String(req.query.ids || "").split(",").filter(Boolean);
+    res.json({ success: true, data: await gmailDiagnostics(req.workspaceId, { ids, days: req.query.days }) });
+  }),
+);
 r.get("/google/gmail/messages/:messageId", requireAuth, getGmailMessage);
 r.get("/google/calendar/events", requireAuth, listGoogleCalendarEvents);
 r.post("/google/calendar/sync", requireAuth, syncGoogleCalendarEvents);
